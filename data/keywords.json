@@ -1,0 +1,6 @@
+[
+  {
+    "triggers" : ["@grok", "@gork", "jarvis", "@gpt", "@sw", "@xiaomi", "@ds", "@mi", "@fr", "@qw"],
+    "script" : "grok"
+  }
+]

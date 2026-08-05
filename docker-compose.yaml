@@ -1,0 +1,10 @@
+services:
+  bot:
+    build: .
+    container_name: uwa-ai-marv-bot
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./persistence:/app/persistence
+    mem_limit: 1g
+    memswap_limit: 1g

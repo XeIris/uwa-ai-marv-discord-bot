@@ -1,0 +1,24 @@
+.env
+node_modules/*
+*/temp/*
+*.db
+*.zip
+*.csv
+*.log
+_*.js
+persistence/
+# Personal Claude Code config stays local; shared agent rules are committed.
+.claude/*
+!.claude/rules/
+
+*.db-wal
+*.db-shm
+
+# whitelist
+!data/*.txt
+.DS_Store
+
+# GM soundfont for the JAYDON music generator (~31 MB, not committed).
+# Fetch with: bun scripts/fetch-soundfont.ts (Dockerfile does this at build).
+data/soundfonts/*.sf2
+data/soundfonts/*.sf3

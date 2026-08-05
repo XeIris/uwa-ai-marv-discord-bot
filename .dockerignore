@@ -1,0 +1,12 @@
+node_modules
+.env
+.git
+npm-debug.log
+logs.txt
+database.db
+persistence/
+.DS_Store
+local_db_folder/
+# Downloaded (checksum-verified) inside the Dockerfile by scripts/fetch-soundfont.ts
+# — never copy a stale local soundfont into the image.
+data/soundfonts/

@@ -1,0 +1,44 @@
+{
+  "name": "uwa-ai-marv-discord-bot",
+  "version": "1.0.0",
+  "description": "AI-only fork of the Silverwolf Discord bot (chat, sessions, usage, image/music generation). No website, games, or economy.",
+  "main": "index.ts",
+  "scripts": {
+    "start": "bun index.ts",
+    "dev": "bun --watch index.ts",
+    "test": "bun test --preload ./tests/setup.ts",
+    "test:watch": "bun test --watch --preload ./tests/setup.ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "tsc --noEmit",
+    "fetch:soundfont": "bun scripts/fetch-soundfont.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/generative-ai": "^0.16.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "discord.js": "^14.26.0",
+    "mime": "^2.5.2",
+    "openai": "^5.12.2",
+    "spessasynth_core": "^4.3.12",
+    "unpdf": "^1.6.2"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.11",
+    "@types/mime": "2",
+    "@types/node": "^25.5.0",
+    "@typescript-eslint/eslint-plugin": "^8.58.0",
+    "@typescript-eslint/parser": "^8.58.0",
+    "eslint": "^8.56.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-plugin-import": "^2.29.1",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-promise": "^6.1.1",
+    "typescript": "^6.0.2"
+  },
+  "overrides": {
+    "ws": "^8.21.0"
+  }
+}
