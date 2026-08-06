@@ -13,7 +13,7 @@ class CommitteeRemove extends AdminCommand {
         type: 3,
         autocomplete: true,
       },
-    ], { isSubcommandOf: 'committee', blame: 'ei' });
+    ], { isSubcommandOf: 'committee' });
   }
 
   async autocomplete(interaction: any): Promise<void> {

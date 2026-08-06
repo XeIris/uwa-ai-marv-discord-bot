@@ -4,7 +4,7 @@ import { clearCachedAllowedServers } from '../utils/accessControl';
 
 class ServerRegister extends DevCommand {
   constructor(client: any) {
-    super(client, 'register', 'Register this server for bot commands', [], { isSubcommandOf: 'server', blame: 'ei' });
+    super(client, 'register', 'Register this server for bot commands', [], { isSubcommandOf: 'server' });
   }
 
   async run(interaction: any): Promise<void> {

@@ -2,7 +2,7 @@ import { DevCommand } from './classes/DevCommand';
 
 class PingDev extends DevCommand {
   constructor(client: any) {
-    super(client, 'dev', 'pong but for dev', [], { isSubcommandOf: 'ping', blame: 'ei' });
+    super(client, 'dev', 'pong but for dev', [], { isSubcommandOf: 'ping' });
   }
 
   async run(interaction: any): Promise<void> {

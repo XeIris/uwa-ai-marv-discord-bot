@@ -63,7 +63,7 @@ birthday/baby/football schedulers, pokemon handlers, and the quote system. `data
 a single entry (the AI triggers). Don't resurrect these without saying so.
 
 **Dev/admin commands kept** (generic, not tied to stripped features): `/eval`, `/execute`,
-`/ping dev`, `/dev ramstats`, `/dbdump`, `/logdump`, `/blame`, `/serverconfig get|setchannel|
+`/ping dev`, `/dev ramstats`, `/dbdump`, `/logdump`, `/serverconfig get|setchannel|
 setrole|setvalue`, `/globalconfig get|set`, `/blacklist configure|view`, `/server register|
 unregister`.
 
@@ -76,7 +76,7 @@ unregister`.
 **Adding a command.** One file per command in `commands/`, extending `Command` or `DevCommand`
 (`commands/classes/`); auto-discovered on restart by `loadCommands()`. The constructor calls
 `super(client, name, description, options[], opts)` where
-`opts = { ephemeral, skipDefer, isSubcommandOf, blame }`; implement `async run(interaction)`.
+`opts = { ephemeral, skipDefer, isSubcommandOf }`; implement `async run(interaction)`.
 Subcommands: file named `group_sub.ts` with `isSubcommandOf: 'group'`, plus an entry in the group
 container at `commands/commandgroups/group.ts`.
 

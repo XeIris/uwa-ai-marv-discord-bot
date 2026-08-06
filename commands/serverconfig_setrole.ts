@@ -21,7 +21,7 @@ class ServerConfigSetRole extends DevCommand {
         type: 8,
         required: true,
       },
-    ], { isSubcommandOf: 'serverconfig', blame: 'ei' });
+    ], { isSubcommandOf: 'serverconfig' });
   }
 
   async run(interaction: any): Promise<void> {

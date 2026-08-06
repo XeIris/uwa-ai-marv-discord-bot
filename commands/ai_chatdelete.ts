@@ -13,7 +13,6 @@ class AiChatdelete extends Command {
       },
     ], {
       isSubcommandOf: 'ai',
-      blame: 'xei',
     });
   }
 

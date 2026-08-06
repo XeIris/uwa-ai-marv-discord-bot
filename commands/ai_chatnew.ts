@@ -25,7 +25,6 @@ class AiChatnew extends Command {
       },
     ], {
       isSubcommandOf: 'ai',
-      blame: 'ei',
     });
   }
 

@@ -92,7 +92,7 @@ class DBDump extends DevCommand {
           { name: 'All Data', value: 'all' },
         ],
       },
-    ], { blame: 'both', ephemeral: true });
+    ], { ephemeral: true });
   }
 
   async run(interaction: any): Promise<void> {

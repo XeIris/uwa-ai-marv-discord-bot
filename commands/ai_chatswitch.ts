@@ -13,7 +13,6 @@ class AiChatswitch extends Command {
       },
     ], {
       isSubcommandOf: 'ai',
-      blame: 'xei',
     });
   }
 

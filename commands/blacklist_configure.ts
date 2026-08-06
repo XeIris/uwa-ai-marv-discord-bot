@@ -33,7 +33,7 @@ class BlacklistConfigure extends DevCommand {
         type: 3,
         required: false,
       },
-    ], { isSubcommandOf: 'blacklist', blame: 'xei' });
+    ], { isSubcommandOf: 'blacklist' });
   }
 
   async run(interaction: any): Promise<void> {

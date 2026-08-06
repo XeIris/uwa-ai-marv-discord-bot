@@ -6,7 +6,6 @@ export interface CommandArgs {
   ephemeral?: boolean;
   skipDefer?: boolean;
   isSubcommandOf?: string | null;
-  blame?: string;
 }
 
 class Command {
@@ -17,7 +16,6 @@ class Command {
   ephemeral: boolean;
   skipDefer: boolean;
   isSubcommandOf: string | null;
-  blame: string;
 
   constructor(
     client: any,
@@ -25,7 +23,7 @@ class Command {
     description: string,
     options: any[],
     args: CommandArgs = {
-      ephemeral: false, skipDefer: false, isSubcommandOf: null, blame: '',
+      ephemeral: false, skipDefer: false, isSubcommandOf: null,
     },
   ) {
     this.client = client;
@@ -35,7 +33,6 @@ class Command {
     this.ephemeral = args.ephemeral || false;
     this.skipDefer = args.skipDefer || false;
     this.isSubcommandOf = args.isSubcommandOf || null;
-    this.blame = args.blame || '';
   }
 
   async execute(interaction: any): Promise<void> {
@@ -81,8 +78,7 @@ class Command {
       // Inform the user about the error, if needed
       await interaction.editReply({
         content: 'An error occurred while executing the command.\n'
-        + 'Please try again later or modify the inputs.\n'
-        + 'If the issue persists, run /blame command_name and spam ping whoever made the command.',
+        + 'Please try again later or modify the inputs.',
       });
     }
   }

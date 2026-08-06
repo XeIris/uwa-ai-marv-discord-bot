@@ -23,7 +23,7 @@ class ServerConfigSetValue extends DevCommand {
         type: 3,
         required: true,
       },
-    ], { isSubcommandOf: 'serverconfig', blame: 'ei' });
+    ], { isSubcommandOf: 'serverconfig' });
   }
 
   async run(interaction: any): Promise<void> {

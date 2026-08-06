@@ -7,7 +7,6 @@ class CommitteeList extends Command {
   constructor(client: any) {
     super(client, 'list', 'Show the club committee roster', [], {
       isSubcommandOf: 'committee',
-      blame: 'ei',
     });
   }
 

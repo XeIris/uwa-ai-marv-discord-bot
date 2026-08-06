@@ -7,7 +7,7 @@ class EventDelete extends AdminCommand {
       {
         name: 'event', description: 'Which event to delete', type: 4, required: true, autocomplete: true,
       },
-    ], { isSubcommandOf: 'event', blame: 'ei' });
+    ], { isSubcommandOf: 'event' });
   }
 
   async autocomplete(interaction: any): Promise<void> {

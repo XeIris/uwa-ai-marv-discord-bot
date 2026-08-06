@@ -6,7 +6,6 @@ class GlobalConfigGet extends DevCommand {
   constructor(client: any) {
     super(client, 'get', 'List all documented global config values', [], {
       isSubcommandOf: 'globalconfig',
-      blame: 'ei',
     });
   }
 

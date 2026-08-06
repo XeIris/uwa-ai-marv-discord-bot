@@ -22,7 +22,6 @@ class RamStats extends DevCommand {
       },
     ], {
       isSubcommandOf: 'dev',
-      blame: 'ei',
     });
   }
 

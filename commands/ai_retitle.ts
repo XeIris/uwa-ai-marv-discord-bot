@@ -14,7 +14,6 @@ class AiRetitle extends Command {
       },
     ], {
       isSubcommandOf: 'ai',
-      blame: 'both',
     });
   }
 

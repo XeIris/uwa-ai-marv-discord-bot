@@ -19,7 +19,7 @@ class CommitteeUpdate extends AdminCommand {
       { name: 'executive', description: 'Is this an executive position?', type: 5 },
       { name: 'order', description: 'Sort order within the section, lower first', type: 4 },
       { name: 'name', description: 'Display name to show', type: 3 },
-    ], { isSubcommandOf: 'committee', blame: 'ei' });
+    ], { isSubcommandOf: 'committee' });
   }
 
   async autocomplete(interaction: any): Promise<void> {

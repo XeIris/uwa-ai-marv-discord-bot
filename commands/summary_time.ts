@@ -35,7 +35,7 @@ class Summary extends Command {
         type: 4,
         required: false,
       },
-    ], { isSubcommandOf: 'summary', blame: 'ei' });
+    ], { isSubcommandOf: 'summary' });
   }
 
   async run(interaction: any): Promise<void> {

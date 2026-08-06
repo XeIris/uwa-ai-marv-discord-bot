@@ -21,7 +21,7 @@ class LogDump extends DevCommand {
           { name: 'log', value: 'log' },
         ],
       },
-    ], { blame: 'ei' });
+    ]);
   }
 
   async run(interaction: any): Promise<void> {

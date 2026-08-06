@@ -5,7 +5,7 @@ import { clearCachedAllowedServers } from '../utils/accessControl';
 
 class ServerUnregister extends DevCommand {
   constructor(client: any) {
-    super(client, 'unregister', 'Unregister this server from bot commands', [], { isSubcommandOf: 'server', blame: 'ei' });
+    super(client, 'unregister', 'Unregister this server from bot commands', [], { isSubcommandOf: 'server' });
   }
 
   async run(interaction: any): Promise<void> {

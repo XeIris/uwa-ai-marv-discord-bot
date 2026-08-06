@@ -15,7 +15,7 @@ class EventAdd extends AdminCommand {
       { name: 'location', description: 'Where it happens', type: 3 },
       { name: 'description', description: 'What it is', type: 3 },
       { name: 'url', description: 'Link (signup, event page, etc.)', type: 3 },
-    ], { isSubcommandOf: 'event', blame: 'ei' });
+    ], { isSubcommandOf: 'event' });
   }
 
   async run(interaction: any): Promise<void> {

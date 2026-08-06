@@ -16,7 +16,6 @@ class AiUsageSubcommand extends Command {
   constructor(client: any) {
     super(client, 'usage', 'View your AI credit usage and limits', [], {
       isSubcommandOf: 'ai',
-      blame: 'xei',
     });
   }
 

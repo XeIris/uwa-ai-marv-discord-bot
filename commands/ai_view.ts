@@ -18,7 +18,6 @@ class AiView extends Command {
       },
     ], {
       isSubcommandOf: 'ai',
-      blame: 'xei',
     });
   }
 

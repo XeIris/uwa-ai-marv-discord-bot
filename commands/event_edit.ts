@@ -15,7 +15,7 @@ class EventEdit extends AdminCommand {
       { name: 'location', description: 'Where it happens (use "none" to clear)', type: 3 },
       { name: 'description', description: 'What it is (use "none" to clear)', type: 3 },
       { name: 'url', description: 'Link (use "none" to clear)', type: 3 },
-    ], { isSubcommandOf: 'event', blame: 'ei' });
+    ], { isSubcommandOf: 'event' });
   }
 
   async autocomplete(interaction: any): Promise<void> {

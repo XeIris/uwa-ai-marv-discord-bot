@@ -24,7 +24,7 @@ class ServerConfigSetChannel extends DevCommand {
         required: true,
         channel_types: [0],
       },
-    ], { isSubcommandOf: 'serverconfig', blame: 'ei' });
+    ], { isSubcommandOf: 'serverconfig' });
   }
 
   async run(interaction: any): Promise<void> {

@@ -6,7 +6,6 @@ class ServerConfigGet extends DevCommand {
   constructor(client: any) {
     super(client, 'get', 'List all settable server config values for this guild', [], {
       isSubcommandOf: 'serverconfig',
-      blame: 'ei',
     });
   }
 

@@ -8,7 +8,7 @@ class Eval extends DevCommand {
       description: 'js code',
       type: 3,
       required: true,
-    }], { blame: 'ei' });
+    }]);
   }
 
   async run(interaction: any): Promise<void> {

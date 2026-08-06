@@ -23,7 +23,7 @@ class GlobalConfigSet extends DevCommand {
         type: 3,
         required: true,
       },
-    ], { isSubcommandOf: 'globalconfig', blame: 'ei' });
+    ], { isSubcommandOf: 'globalconfig' });
   }
 
   async run(interaction: any): Promise<void> {

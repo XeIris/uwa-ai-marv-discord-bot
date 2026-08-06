@@ -17,7 +17,7 @@ class CommitteeAdd extends AdminCommand {
       { name: 'executive', description: 'Is this an executive position? (default: no)', type: 5 },
       { name: 'order', description: 'Sort order within the section, lower first (default: 100)', type: 4 },
       { name: 'name', description: 'Display name to show (default: their server nickname)', type: 3 },
-    ], { isSubcommandOf: 'committee', blame: 'ei' });
+    ], { isSubcommandOf: 'committee' });
   }
 
   async run(interaction: any): Promise<void> {

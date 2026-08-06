@@ -7,7 +7,7 @@ class EventList extends Command {
   constructor(client: any) {
     super(client, 'list', 'Show the club events calendar', [
       { name: 'include_past', description: 'Also show events that have already happened', type: 5 },
-    ], { isSubcommandOf: 'event', blame: 'ei' });
+    ], { isSubcommandOf: 'event' });
   }
 
   async run(interaction: any): Promise<void> {

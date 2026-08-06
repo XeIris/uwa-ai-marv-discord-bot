@@ -29,7 +29,7 @@ class Summary extends Command {
         type: 4,
         required: true,
       },
-    ], { isSubcommandOf: 'summary', blame: 'ei' });
+    ], { isSubcommandOf: 'summary' });
   }
 
   async run(interaction: any): Promise<void> {

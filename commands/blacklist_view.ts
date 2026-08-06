@@ -11,7 +11,7 @@ class BlacklistView extends DevCommand {
         type: 3,
         required: true,
       },
-    ], { isSubcommandOf: 'blacklist', blame: 'xei' });
+    ], { isSubcommandOf: 'blacklist' });
   }
 
   async run(interaction: any): Promise<void> {
