@@ -1,10 +1,28 @@
 # UWA AI Marv (Discord Bot)
 
-A fork of the Silverwolf Discord bot stripped down to **AI features only**: mention-triggered AI
-chat (webhook replies), per-user chat sessions, credit metering, chat summaries, and web-search /
-image / music generation tools. No website, no games/economy, no roleplay system.
+A fork of [Mewtwo2387/silverwolf](https://github.com/Mewtwo2387/silverwolf) stripped down to
+**AI features only**: mention-triggered AI chat (webhook replies), per-user chat sessions, credit
+metering, chat summaries, and web-search / image / music generation tools. No website, no
+games/economy, no roleplay system. Adds club-specific features for the UWA AI Club — the `Marv`
+mascot persona and the committee / events / constitution data it reads.
+
+It isn't a GitHub fork and shares no commit history with upstream (this repo starts from a squashed
+import), so upstream fixes come across by cherry-pick rather than merge:
+
+```bash
+git remote add upstream https://github.com/Mewtwo2387/silverwolf.git
+git fetch upstream
+git cherry-pick <sha>   # patch application by path — works without a common ancestor
+```
 
 > **Technical reference**: see [AGENTS.md](AGENTS.md).
+
+## Licence
+
+Upstream publishes no licence, so the inherited code is under its authors' default copyright
+(all rights reserved) and this fork is redistributed with their knowledge rather than under a
+grant. Ask upstream to add a licence before reusing any of this elsewhere; `package.json` is
+marked `UNLICENSED` until then.
 
 ## Setup
 

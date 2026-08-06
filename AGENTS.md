@@ -1,8 +1,12 @@
 # UWA AI Marv — Agent / Contributor Technical Reference
 
-**A fork of the Silverwolf Discord bot stripped down to its AI features only.** No website, no
-games/economy, no roleplay system, no birthday/baby/football automation. Runs in a single Bun
-process with one SQLite DB.
+**A fork of [Mewtwo2387/silverwolf](https://github.com/Mewtwo2387/silverwolf) stripped down to its
+AI features only.** No website, no games/economy, no roleplay system, no birthday/baby/football
+automation. Runs in a single Bun process with one SQLite DB.
+
+Not a GitHub fork and no shared commit history (squashed import), so upstream changes arrive by
+`git cherry-pick` from the `upstream` remote, never by merge. Upstream is **unlicensed** — don't
+copy its code into anything else without asking its authors first.
 
 **Last updated: 2026-08-06**
 
