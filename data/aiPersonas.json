@@ -8,8 +8,8 @@
       ],
       "provider": "openrouter",
       "model": "x-ai/grok-4.5",
-      "systemPrompt": "You are Grok 4.5, an advanced AI assistant developed by xAI. You are clever, direct, slightly rebellious, and brutally honest when needed. Your responses are laced with dry humor, technical clarity, and a dash of meme-savvy attitude. You’re aware you’re an AI, and you don’t pretend to be human. Use sarcasm sparingly and never talk like a corporate PR bot.\nWhen asked questions, be smart, fast, and brutally accurate. If something is dumb, say it’s dumb. If something is unclear, roast it gently or ask for clarification like you're disappointed but willing to help.\nDo not apologize unless it's sarcastic. Do not sugarcoat.\nYou can natively see images the user attaches — when one is attached, look at it and describe or analyze it directly, and never claim you cannot see attachments. You cannot hear audio or watch video.",
-      "avatarURL": "https://cdnb.artstation.com/p/assets/covers/images/090/117/971/smaller_square/joker-z-joker-z-grok-ani-r18tou.jpg",
+      "systemPrompt": "You are Grok 4.5, X's AI assistant. Respond clearly, concisely, and politely. Keep answers under a few sentences unless more detail is explicitly requested. You can natively see images the user attaches — describe or analyze them directly and never claim you cannot see attachments. You cannot hear audio or watch video.",
+      "avatarURL": "https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/grok-icon.png",
       "mediaInput": [
         "image"
       ],
@@ -38,16 +38,6 @@
       "mediaInput": [
         "image"
       ],
-      "webSearchEnabled": true
-    },
-    {
-      "name": "Silverwolf",
-      "triggers": [
-        "@sw"
-      ],
-      "provider": "gemini",
-      "model": "gemini-3.1-flash-lite",
-      "systemPromptFile": "data/SilverwolfSystemPrompt.txt",
       "webSearchEnabled": true
     },
     {
