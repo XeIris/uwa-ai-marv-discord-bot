@@ -6,11 +6,15 @@ import serverConfigQueries from './queries/serverConfigQueries';
 import imageGenQueries from './queries/imageGenQueries';
 import musicGenQueries from './queries/musicGenQueries';
 import aiUsageQueries from './queries/aiUsageQueries';
+import committeeQueries from './queries/committeeQueries';
+import eventQueries from './queries/eventQueries';
 import * as modelClasses from './models';
 import type { TableDefinition, QueryResult } from './types';
 import type AiChatModel from './models/AiChatModel';
 import type AiUsageModel from './models/AiUsageModel';
 import type CommandConfigModel from './models/CommandConfigModel';
+import type CommitteeModel from './models/CommitteeModel';
+import type EventModel from './models/EventModel';
 import type GlobalConfigModel from './models/GlobalConfigModel';
 import type ImageGenModel from './models/ImageGenModel';
 import type MusicGenModel from './models/MusicGenModel';
@@ -92,6 +96,45 @@ class Database {
     // Update all tables
     await Promise.all(Object.values(tables).map((table) => this.updateTable(table)));
 
+    // The Silverwolf schema pointed AiChatSession.user_id at a User table this
+    // fork doesn't have. SQLite resolves FK targets at statement-prepare time,
+    // so with PRAGMA foreign_keys = ON every INSERT died with
+    // "no such table: main.User". SQLite can't ALTER a constraint away — rebuild.
+    // Runs before the index block below, which recreates the indexes DROP TABLE
+    // takes with it. Idempotent: skipped on subsequent boots.
+    const aiSessionSchema = this.db
+      .query("SELECT sql FROM sqlite_master WHERE type='table' AND name='AiChatSession'")
+      .get() as { sql?: string } | null;
+    if (aiSessionSchema?.sql && /REFERENCES\s+User\b/i.test(aiSessionSchema.sql)) {
+      log('Migrating AiChatSession: dropping dangling User foreign key');
+      this.db.run('BEGIN IMMEDIATE TRANSACTION');
+      try {
+        this.db.run(`
+          CREATE TABLE AiChatSession_new (
+            session_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id VARCHAR NOT NULL,
+            persona_name VARCHAR NOT NULL,
+            active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            title TEXT DEFAULT NULL,
+            source TEXT NOT NULL DEFAULT 'discord'
+          )
+        `);
+        this.db.run(`
+          INSERT INTO AiChatSession_new (session_id, user_id, persona_name, active, created_at, title, source)
+          SELECT session_id, user_id, persona_name, active, created_at, title, source FROM AiChatSession
+        `);
+        this.db.run('DROP TABLE AiChatSession');
+        this.db.run('ALTER TABLE AiChatSession_new RENAME TO AiChatSession');
+        this.db.run('COMMIT');
+        log('AiChatSession migration complete');
+      } catch (err) {
+        this.db.run('ROLLBACK');
+        logError('AiChatSession migration failed:', err);
+        throw err;
+      }
+    }
+
     // Normalize legacy duplicate-active AI sessions before adding uniqueness enforcement
     this.db.run(`
       UPDATE AiChatSession
@@ -161,6 +204,10 @@ class Database {
 
     // AI Usage tracking
     this.db.run(aiUsageQueries.CREATE_INDEX_USER_CREATED);
+
+    // Club data: roster ordering and the upcoming-events lookup.
+    this.db.run(committeeQueries.CREATE_SERVER_ORDER_INDEX);
+    this.db.run(eventQueries.CREATE_SERVER_STARTS_INDEX);
 
     // Migrate legacy ServerRoles into ServerConfig when opening an older database.
     this.migrateLegacyServerRolesIfNeeded();
@@ -318,6 +365,8 @@ class Database {
   get aiChat(): AiChatModel { return this.models.AiChatModel; }
   get aiUsage(): AiUsageModel { return this.models.AiUsageModel; }
   get commandConfig(): CommandConfigModel { return this.models.CommandConfigModel; }
+  get committee(): CommitteeModel { return this.models.CommitteeModel; }
+  get event(): EventModel { return this.models.EventModel; }
   get globalConfig(): GlobalConfigModel { return this.models.GlobalConfigModel; }
   get imageGen(): ImageGenModel { return this.models.ImageGenModel; }
   get musicGen(): MusicGenModel { return this.models.MusicGenModel; }

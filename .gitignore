@@ -22,3 +22,6 @@ persistence/
 # Fetch with: bun scripts/fetch-soundfont.ts (Dockerfile does this at build).
 data/soundfonts/*.sf2
 data/soundfonts/*.sf3
+
+# Real committee roster (names + Discord IDs) — seed input, never committed.
+data/committee-seed.json

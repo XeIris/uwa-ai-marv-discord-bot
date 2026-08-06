@@ -11,7 +11,9 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
-    "fetch:soundfont": "bun scripts/fetch-soundfont.ts"
+    "fetch:soundfont": "bun scripts/fetch-soundfont.ts",
+    "fetch:constitution": "bun scripts/fetch-constitution.ts",
+    "seed:committee": "bun scripts/seed-committee.ts"
   },
   "keywords": [],
   "author": "",

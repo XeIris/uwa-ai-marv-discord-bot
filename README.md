@@ -25,8 +25,8 @@ bun run start  # production
 ```
 
 After first boot, register your server with `/server register`, then mention the bot
-(`@grok`, `@sw`, `@ds`, ...) in a channel to chat with an AI persona. Personas live in
-`data/aiPersonas.json`; use "kys" to start a fresh session.
+(`@marv`, `@grok`, `@ds`, ...) in a channel to chat with an AI persona. Personas live in
+`data/aiPersonas.json`; use `-n` to start a fresh session.
 
 ## What's here
 
@@ -34,6 +34,7 @@ After first boot, register your server with `/server register`, then mention the
 - Session management: `/ai view|chatnew|chatswitch|chatdelete|retitle`
 - Credits & usage: `/ai usage`
 - Chat summaries: `/summary count|time`
+- Club data Marv can read: `/committee add|remove|update|list`, `/event add|edit|delete|list`
 - Generic dev/admin: `/eval`, `/execute`, `/dev ramstats`, `/dbdump`, `/logdump`, `/serverconfig`,
   `/globalconfig`, `/blacklist`, `/server`
 

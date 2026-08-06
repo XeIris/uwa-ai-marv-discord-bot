@@ -5,11 +5,12 @@
       "@gork",
       "jarvis",
       "@gpt",
-      "@xiaomi",
       "@ds",
       "@mi",
       "@fr",
-      "@qw"
+      "@qw",
+      "@marv",
+      "@asimarv"
     ],
     "script": "grok"
   }

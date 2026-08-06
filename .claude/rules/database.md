@@ -16,6 +16,12 @@ personaName)`, `db.aiUsage.addUsage(...)`.
 - **No formal migration system.** `Database.init()` does `CREATE TABLE IF NOT EXISTS`, `ALTER TABLE`
   to add missing columns, manual index creation, and `PRAGMA foreign_keys = ON`. Schema changes go
   there. Legacy `ServerRoles` rows auto-migrate into `ServerConfig` (`role:<name>` keys) on boot.
+- **`PRAGMA foreign_keys = ON`, so a FK target that doesn't exist breaks every write to that
+  table** — SQLite resolves targets at statement-prepare time and throws `no such table: main.X`.
+  This fork inherited `AiChatSession.user_id REFERENCES User(id)` after the `User` table was
+  stripped, which silently killed all chat-session persistence. When stripping a table, grep the
+  `constraints` arrays for references to it. `tests/database/aiChat.test.ts` has a schema-integrity
+  test that walks `PRAGMA foreign_key_list` over every table and fails on a dangling target.
 - Multi-statement atomicity: `db.executeTransaction((rawDb) => { ... })`. Transactions are
   serialized through an in-process FIFO queue (a single connection can't interleave BEGINs — the
   second used to roll back the first's writes). **Never call `executeTransaction` from inside a

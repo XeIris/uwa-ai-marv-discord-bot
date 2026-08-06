@@ -27,9 +27,12 @@ const aiChatSessionTable: TableDefinition = {
   ],
   primaryKey: ['session_id'],
   specialConstraints: [],
-  constraints: [
-    'FOREIGN KEY (user_id) REFERENCES User(id)',
-  ],
+  // No FK on user_id: this fork has no User table (it was stripped with the
+  // games/economy system). The inherited `REFERENCES User(id)` made every
+  // INSERT fail at prepare time with "no such table: main.User" once
+  // PRAGMA foreign_keys = ON. Database.init() rebuilds older tables that
+  // still carry it.
+  constraints: [],
 };
 
 export default aiChatSessionTable;

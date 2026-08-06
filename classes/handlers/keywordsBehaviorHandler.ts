@@ -12,6 +12,8 @@ import {
 import { getRateLimitErrorMessage } from '../../utils/discordRateLimit';
 import { IMAGE_GEN_TOOL_NAME, IMAGE_EDIT_MAX_SOURCES } from '../../utils/imageGen';
 import { MUSIC_GEN_TOOL_NAME, MUSIC_GUIDE_TOOL_NAME } from '../../utils/musicGen';
+import { CLUB_TOOL_NAMES, perthDateString } from '../../utils/clubInfo';
+import { parseNewSessionFlag } from '../../utils/sessionFlag';
 import { trimHistoryToFit } from '../../utils/tokenizer';
 import { extractPdfsFromMessage } from '../../utils/pdf';
 import {
@@ -26,8 +28,8 @@ const scriptHandlers = {
     const username = message.author?.username
       ? message.author.username.toLowerCase()
       : 'user';
-    const query = message.content || '';
-    const shouldStartNewSession = /\bkys\b/i.test(query);
+    // `-n` requests a fresh session and is stripped before the model sees it.
+    const { requested: shouldStartNewSession, text: query } = parseNewSessionFlag(message.content || '');
 
     const contextMsg = message.reference
       ? await message.channel.messages
@@ -142,15 +144,30 @@ const scriptHandlers = {
     const allPlaceholders = [...mediaPlaceholders, ...editOnlyPlaceholders];
     const mediaSuffix = allPlaceholders.length > 0 ? `\n${allPlaceholders.join('\n')}` : '';
 
+    // Tag every prompt with who is speaking and what club role they hold, so the
+    // persona knows whether it's talking to the Treasurer or a random member. A
+    // roster lookup failure must never cost us the reply.
+    let speakerTitle = 'Ordinary Member';
+    if (message.guild) {
+      try {
+        const titles = await (message.client as any).db.committee
+          .getTitlesForUser(message.guild.id, message.author.id);
+        if (titles.length > 0) speakerTitle = titles.join(' / ');
+      } catch (titleErr) {
+        logError('Committee: failed to look up speaker title, defaulting to Ordinary Member:', titleErr);
+      }
+    }
+    const metaPrefix = `[${perthDateString()}]-[${speakerTitle}]-[${username}]-`;
+
     let prompt = '';
 
     if (contextMsg) {
       const promptName = (contextMsg.author.username === displayName) ? 'You' : contextMsg.author.username;
       prompt = `${pdfPrefix}Previous message by ${promptName}: "${contextMsg.content}"
 
-      User ${username} said: ${query}${mediaSuffix}`;
+      ${metaPrefix}User ${username} said: ${query}${mediaSuffix}`;
     } else {
-      prompt = `${pdfPrefix}User ${username} said: ${query}${mediaSuffix}`;
+      prompt = `${pdfPrefix}${metaPrefix}User ${username} said: ${query}${mediaSuffix}`;
     }
 
     log(`Prompt: ${prompt}`);
@@ -222,6 +239,11 @@ const scriptHandlers = {
         musicGen: hasMemory
           ? { userId: message.author.id, db: (message.client as any).db }
           : undefined,
+        // Club data (constitution, roster, events) is per-guild and only offered
+        // to personas that opt in — currently Marv.
+        club: (persona.clubTools && message.guild)
+          ? { db: (message.client as any).db, guildId: message.guild.id }
+          : undefined,
       });
 
       let genResult;
@@ -263,7 +285,7 @@ const scriptHandlers = {
           .setColor('#FEE75C')
           .setTitle('⚠ Context limit reached')
           .setDescription(`Trimmed **${trimWarning.trimmedCount}** old message${trimWarning.trimmedCount === 1 ? '' : 's'} to fit this model's context window. The oldest parts of the conversation are no longer visible to me.`)
-          .setFooter({ text: 'Use "kys" to start a fresh session' });
+          .setFooter({ text: 'Use "-n" to start a fresh session' });
         try {
           await message.reply({ embeds: [trimEmbed], allowedMentions: { repliedUser: false } });
         } catch (warnErr) {
@@ -272,7 +294,9 @@ const scriptHandlers = {
       }
 
       const MAX_LENGTH = 2000;
-      const nonSearchTools = [IMAGE_GEN_TOOL_NAME, MUSIC_GEN_TOOL_NAME, MUSIC_GUIDE_TOOL_NAME];
+      const nonSearchTools = [
+        IMAGE_GEN_TOOL_NAME, MUSIC_GEN_TOOL_NAME, MUSIC_GUIDE_TOOL_NAME, ...CLUB_TOOL_NAMES,
+      ];
       const searchCallCount = (toolCalls ?? []).filter((tc: any) => !nonSearchTools.includes(tc.name)).length;
       const imageCallHappened = (toolCalls ?? []).some((tc: any) => tc.name === IMAGE_GEN_TOOL_NAME && tc.ok);
       const musicCallHappened = (toolCalls ?? []).some((tc: any) => tc.name === MUSIC_GEN_TOOL_NAME && tc.ok);
@@ -365,7 +389,7 @@ const scriptHandlers = {
         const warningEmbed = new EmbedBuilder()
           .setColor(warningColor as `#${string}`)
           .setDescription(pctWarning.message)
-          .setFooter({ text: 'Use "kys" to start a fresh session' });
+          .setFooter({ text: 'Use "-n" to start a fresh session' });
         try {
           await message.reply({ embeds: [warningEmbed], allowedMentions: { repliedUser: false } });
         } catch (warnErr) {

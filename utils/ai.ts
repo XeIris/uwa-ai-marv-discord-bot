@@ -29,6 +29,18 @@ import {
   runMusicGeneration,
   type MusicGenContext,
 } from './musicGen';
+import {
+  CONSTITUTION_TOOL_NAME,
+  COMMITTEE_TOOL_NAME,
+  CLUB_TOOL_NAMES,
+  clubToolDefs,
+  clubGeminiDecls,
+  buildClubNote,
+  getConstitution,
+  runListCommittee,
+  runListEvents,
+  type ClubContext,
+} from './clubInfo';
 // Note: Bun automatically reads .env files
 
 // Initialize AI providers
@@ -64,6 +76,11 @@ export interface Persona {
   webSearchEnabled?: boolean;
   /** OpenRouter provider-routing object (e.g. { only: ['xiaomi'], allow_fallbacks: false }). */
   providerRouting?: Record<string, any>;
+  /**
+   * Grants the club data tools (constitution, committee roster, events) — see
+   * utils/clubInfo.ts. Only the Marv persona has these; they need a guild.
+   */
+  clubTools?: boolean;
   /**
    * Input modalities the model can read from Discord attachments (openrouter
    * only). `true` means all of image/video/audio (omnimodal, e.g. MiMo);
@@ -208,6 +225,8 @@ interface GenerateContentOptions {
   imageGen?: ImageGenContext;
   /** When set, the model is offered the music tools (get_music_guide + generate_music, Discord-only delivery). */
   musicGen?: MusicGenContext;
+  /** When set, the model is offered the club data tools (constitution, committee roster, events). */
+  club?: ClubContext;
   /**
    * Multimodal content parts (image_url / video_url / input_audio) appended to
    * the current user turn. OpenRouter provider only; base64 data — never
@@ -312,7 +331,7 @@ function getImageGenConfig(): { model: string; modalities: string[] } {
 
 async function generateContentInner({
   db, userId, provider, model, systemPrompt, prompt, history = [], webSearchEnabled = false, imageGen, musicGen,
-  mediaParts = [], providerRouting,
+  club, mediaParts = [], providerRouting,
 }: GenerateContentOptions): Promise<GenerateContentResult> {
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
@@ -359,10 +378,14 @@ ${systemPrompt || ''}
     if (musicGen) {
       toolDefs = [...toolDefs, ...musicToolDefs()];
     }
+    if (club) {
+      toolDefs = [...toolDefs, ...clubToolDefs()];
+    }
     const imageGenNote = buildImageGenNote(imageGen);
     const musicGenNote = buildMusicGenNote(musicGen);
+    const clubNote = buildClubNote(club);
     const useTools = toolDefs.length > 0;
-    const toolNote = searchToolNote + imageGenNote + musicGenNote;
+    const toolNote = searchToolNote + imageGenNote + musicGenNote + clubNote;
 
     // With media the current turn becomes a content-part array; the base64
     // parts live only in this request body and are dropped when it completes.
@@ -526,6 +549,15 @@ ${systemPrompt || ''}
               tcId: tc.id, callName, parsedArgs, resultText, ok,
             };
           }
+          if (club && CLUB_TOOL_NAMES.includes(callName)) {
+            if (callName === CONSTITUTION_TOOL_NAME) resultText = await getConstitution();
+            else if (callName === COMMITTEE_TOOL_NAME) resultText = await runListCommittee(club, parsedArgs);
+            else resultText = await runListEvents(club, parsedArgs);
+            ok = !resultText.startsWith('Error:');
+            return {
+              tcId: tc.id, callName, parsedArgs, resultText, ok,
+            };
+          }
           const res = await callSearchTool(callName, parsedArgs);
           if (res.ok) { resultText = res.content; ok = true; } else { resultText = `Error: ${res.error}`; }
           return {
@@ -534,9 +566,11 @@ ${systemPrompt || ''}
         }));
 
         for (const r of results) {
-          // The music guide is first-party content the model must follow —
-          // don't wrap it in the untrusted-result markers.
-          const isTrustedResult = r.callName === MUSIC_GUIDE_TOOL_NAME || r.callName === MUSIC_GEN_TOOL_NAME;
+          // The music guide and the club data come from our own repo/DB — they're
+          // first-party content, so don't wrap them in the untrusted-result markers.
+          const isTrustedResult = r.callName === MUSIC_GUIDE_TOOL_NAME
+            || r.callName === MUSIC_GEN_TOOL_NAME
+            || CLUB_TOOL_NAMES.includes(r.callName);
           requestMessages.push({
             role: 'tool',
             tool_call_id: r.tcId,
@@ -605,10 +639,15 @@ ${systemPrompt || ''}
       if (geminiTools.length === 0) geminiTools = [{ functionDeclarations: [] }];
       geminiTools[0].functionDeclarations.push(...musicGeminiDecls());
     }
+    if (club && !isImageModel) {
+      if (geminiTools.length === 0) geminiTools = [{ functionDeclarations: [] }];
+      geminiTools[0].functionDeclarations.push(...clubGeminiDecls());
+    }
     const imageGenNote = !isImageModel ? buildImageGenNote(imageGen) : '';
     const musicGenNote = !isImageModel ? buildMusicGenNote(musicGen) : '';
+    const clubNote = !isImageModel ? buildClubNote(club) : '';
     const useTools = geminiTools.length > 0;
-    const toolNote = searchToolNote + imageGenNote + musicGenNote;
+    const toolNote = searchToolNote + imageGenNote + musicGenNote + clubNote;
 
     const modelClientOptions: any = {
       model: currentGeminiModel,
@@ -722,6 +761,22 @@ ${systemPrompt || ''}
               functionResponse: {
                 name: fc.name,
                 response: { result: genContent },
+              },
+            };
+          }
+          if (club && CLUB_TOOL_NAMES.includes(fc.name)) {
+            let clubContent: string;
+            if (fc.name === CONSTITUTION_TOOL_NAME) clubContent = await getConstitution();
+            else if (fc.name === COMMITTEE_TOOL_NAME) clubContent = await runListCommittee(club, args);
+            else clubContent = await runListEvents(club, args);
+            toolCalls.push({
+              name: fc.name, args, resultText: clubContent, ok: !clubContent.startsWith('Error:'),
+            });
+            // First-party data — not wrapped in the untrusted-result markers.
+            return {
+              functionResponse: {
+                name: fc.name,
+                response: { result: clubContent },
               },
             };
           }
@@ -912,7 +967,9 @@ function stripPersonaTriggers(text: string): string {
 }
 
 function unwrapDiscordUserMessage(message: string): string {
-  const match = message.match(/(?:^|\n\n)User\s+\S+\s+said:\s*([\s\S]*)$/i);
+  // The line also carries a leading `[date]-[title]-[name]-` metadata prefix
+  // (keywordsBehaviorHandler), so this deliberately doesn't anchor to line start.
+  const match = message.match(/User\s+\S+\s+said:\s*([\s\S]*)$/i);
   if (match) return match[1].trim();
   return message.trim();
 }

@@ -4,7 +4,7 @@
 games/economy, no roleplay system, no birthday/baby/football automation. Runs in a single Bun
 process with one SQLite DB.
 
-**Last updated: 2026-08-05**
+**Last updated: 2026-08-06**
 
 > **Maintenance rule.** Edit agent docs only on *substantive architectural* change — new
 > architecture, new auth, new data flows/services, schema or security-model changes, or when
@@ -22,7 +22,8 @@ duplicate their content here.
 | Working on | Loads |
 | ------ | ------ |
 | `database/**` | `.claude/rules/database.md` — DAO layering, transactions, settings tables |
-| `utils/ai*`, `utils/llmRetry`, `utils/tokenizer` | `.claude/rules/ai-limits.md` — credit metering, retry policy |
+| `utils/ai.ts`, `utils/aiPricing.ts`, `utils/llmRetry.ts`, `commands/ai*.ts`, `AiUsageModel` | `.claude/rules/ai-limits.md` — credit metering, retry policy |
+| `commands/committee_*`, `commands/event_*`, `utils/clubInfo.ts`, the club models | `.claude/rules/club-data.md` — roster, events, constitution |
 | `Dockerfile`, `docker-compose.yaml`, `scripts/**` | `.claude/rules/deploy.md` — image, volumes |
 
 ## Commands
@@ -35,17 +36,26 @@ Boot locally: `bun install` → create `.env` (see `.env.example`) → `bun run 
 - `bun run lint` / `lint:fix` — ESLint (airbnb-base + node + promise).
 - `bun run typecheck` — `tsc --noEmit`.
 - `bun run fetch:soundfont` — download the GM soundfont for the JAYDON music generator.
+- `bun run fetch:constitution` — regenerate `data/skills/constitution.md` from the club's LaTeX source.
+- `bun run seed:committee <guild-id>` — one-off seed of the `Committee` table from the gitignored
+  `data/committee-seed.json` (run with the bot stopped).
 
 Full script list is in `package.json`; env key names are in `.env.example`. Some settings also live
 in the DB `GlobalConfig` table and override/augment env.
 
 ## What's here (and what was stripped)
 
-**AI features:** keyword-triggered AI chat (mention `@grok`/`@sw`/`@ds`/etc. → webhook replies via
+**AI features:** keyword-triggered AI chat (mention `@marv`/`@grok`/`@ds`/etc. → webhook replies via
 `classes/handlers/keywordsBehaviorHandler.ts` → `utils/ai.ts`), per-user chat sessions
 (`/ai view|chatnew|chatswitch|chatdelete|retitle`, `AiChatModel`), credit metering (`/ai usage`,
 `AiUsageModel`), AI chat summaries (`/summary count|time`), and the web-search / image-generation /
 music-generation (JAYDON) tools that ride along in chat. Personas live in `data/aiPersonas.json`.
+
+**Club data (this fork's reason to exist):** `Marv` is the UWA AI Club mascot persona. It's the only
+persona with `clubTools: true`, which grants three read-only tools backed by our own data — the
+committee roster (`/committee`), the events calendar (`/event`), and the club constitution. Every
+user prompt is also tagged `[date]-[committee title]-[username]-` so any persona knows who it's
+talking to. See `.claude/rules/club-data.md`.
 
 **Stripped:** `commands/askSilverwolfAI.ts`, the entire roleplay system (`utils/rp*`,
 `commands/ai_rp_*`, `classes/rpScheduler.ts`), the website (`site_src/`), games/economy,
@@ -84,7 +94,8 @@ message delete/edit tracked for history.
 **Shared code:** `utils/ai.ts` is the core (provider clients, personas, `generateContent`, tools);
 `utils/tokenizer.ts` (context trimming), `utils/aiPricing.ts` + `utils/discordRateLimit.ts` (credits),
 `utils/llmRetry.ts` (retry policy), `utils/mcp.ts` (web-search MCP client), `utils/imageGen.ts` +
-`utils/musicGen.ts` + `utils/aiMedia.ts` (media tools), `utils/pdf.ts` (PDF extraction).
+`utils/musicGen.ts` + `utils/aiMedia.ts` (media tools), `utils/pdf.ts` (PDF extraction),
+`utils/clubInfo.ts` (club data tools).
 
 ## Security & performance guardrails
 
@@ -105,3 +116,8 @@ message delete/edit tracked for history.
   with `bun run fetch:soundfont` before first use.
 - There is no website and no MCP *server* side — only the outbound web-search MCP client in
   `utils/mcp.ts`.
+- **`data/skills/` is bot runtime data, not agent skills.** Those files are read at request time and
+  handed to the chat model as tool results (`get_music_guide`, `recall_constitution`).
+- **`data/keywords.json` gates the AI trigger separately from `data/aiPersonas.json`.** A persona
+  trigger that isn't also in `keywords.json` never fires; both files are imported at boot, so
+  editing either needs a restart.

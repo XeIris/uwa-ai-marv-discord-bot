@@ -1,0 +1,29 @@
+{
+  "_comment": "Copy to data/committee-seed.json (gitignored) and fill in. Seed with: bun run seed:committee <guild-id>. Order here becomes the display order; isExecutive puts a row in the Executive section.",
+  "members": [
+    {
+      "userId": "123456789012345678",
+      "title": "President",
+      "displayName": "Alex",
+      "isExecutive": true
+    },
+    {
+      "userId": "234567890123456789",
+      "title": "Treasurer",
+      "displayName": "Sam",
+      "isExecutive": true
+    },
+    {
+      "userId": "345678901234567890",
+      "title": "Tech Lead",
+      "displayName": "Jordan",
+      "isExecutive": false
+    },
+    {
+      "userId": "456789012345678901",
+      "title": "Ordinary Committee Member",
+      "displayName": null,
+      "isExecutive": false
+    }
+  ]
+}
