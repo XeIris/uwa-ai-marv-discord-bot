@@ -12,6 +12,7 @@ import {
 import { getRateLimitErrorMessage } from '../../utils/discordRateLimit';
 import { IMAGE_GEN_TOOL_NAME, IMAGE_EDIT_MAX_SOURCES } from '../../utils/imageGen';
 import { MUSIC_GEN_TOOL_NAME, MUSIC_GUIDE_TOOL_NAME } from '../../utils/musicGen';
+import { DIAGRAM_GEN_TOOL_NAME, DIAGRAM_GUIDE_TOOL_NAME } from '../../utils/diagramGen';
 import { CLUB_TOOL_NAMES, perthDateString } from '../../utils/clubInfo';
 import { parseNewSessionFlag } from '../../utils/sessionFlag';
 import { trimHistoryToFit } from '../../utils/tokenizer';
@@ -239,6 +240,11 @@ const scriptHandlers = {
         musicGen: hasMemory
           ? { userId: message.author.id, db: (message.client as any).db }
           : undefined,
+        // Diagram rendering rides the same webhook delivery; rate limit keyed
+        // to the requesting Discord user.
+        diagramGen: hasMemory
+          ? { userId: message.author.id, db: (message.client as any).db }
+          : undefined,
         // Club data (constitution, roster, events) is per-guild and only offered
         // to personas that opt in — currently Marv.
         club: (persona.clubTools && message.guild)
@@ -295,23 +301,26 @@ const scriptHandlers = {
 
       const MAX_LENGTH = 2000;
       const nonSearchTools = [
-        IMAGE_GEN_TOOL_NAME, MUSIC_GEN_TOOL_NAME, MUSIC_GUIDE_TOOL_NAME, ...CLUB_TOOL_NAMES,
+        IMAGE_GEN_TOOL_NAME, MUSIC_GEN_TOOL_NAME, MUSIC_GUIDE_TOOL_NAME,
+        DIAGRAM_GEN_TOOL_NAME, DIAGRAM_GUIDE_TOOL_NAME, ...CLUB_TOOL_NAMES,
       ];
       const searchCallCount = (toolCalls ?? []).filter((tc: any) => !nonSearchTools.includes(tc.name)).length;
       const imageCallHappened = (toolCalls ?? []).some((tc: any) => tc.name === IMAGE_GEN_TOOL_NAME && tc.ok);
       const musicCallHappened = (toolCalls ?? []).some((tc: any) => tc.name === MUSIC_GEN_TOOL_NAME && tc.ok);
+      const diagramCallHappened = (toolCalls ?? []).some((tc: any) => tc.name === DIAGRAM_GEN_TOOL_NAME && tc.ok);
       const searchPrefix = searchCallCount > 0
         ? `-# 🔎 searched the web (${searchCallCount})\n`
         : '';
       const imagePrefix = imageCallHappened ? '-# 🎨 generated an image\n' : '';
       const musicPrefix = musicCallHappened ? '-# 🎵 composed music\n' : '';
+      const diagramPrefix = diagramCallHappened ? '-# 📊 drew a diagram\n' : '';
       const mediaReadPrefix = mediaPlaceholders.length > 0 && !mediaDropped
         ? `-# 📎 read ${mediaPlaceholders.length} attachment${mediaPlaceholders.length === 1 ? '' : 's'}\n`
         : '';
       const mediaFailPrefix = mediaDropped
         ? '-# ⚠ the model rejected the attachments — answered without them\n'
         : '';
-      let remainingText = `${searchPrefix}${imagePrefix}${musicPrefix}${mediaReadPrefix}${mediaFailPrefix}${(text || '').toString()}`;
+      let remainingText = `${searchPrefix}${imagePrefix}${musicPrefix}${diagramPrefix}${mediaReadPrefix}${mediaFailPrefix}${(text || '').toString()}`;
       let previousMsg: any = null;
       let filesToAttach: any[] = images || [];
 

@@ -30,6 +30,16 @@ import {
   type MusicGenContext,
 } from './musicGen';
 import {
+  DIAGRAM_GUIDE_TOOL_NAME,
+  DIAGRAM_GEN_TOOL_NAME,
+  diagramToolDefs,
+  diagramGeminiDecls,
+  buildDiagramGenNote,
+  getDiagramGuide,
+  runDiagramGeneration,
+  type DiagramGenContext,
+} from './diagramGen';
+import {
   CONSTITUTION_TOOL_NAME,
   COMMITTEE_TOOL_NAME,
   CLUB_TOOL_NAMES,
@@ -41,6 +51,20 @@ import {
   runListEvents,
   type ClubContext,
 } from './clubInfo';
+import {
+  SHEET_TOOL_NAMES,
+  sheetToolDefs,
+  sheetGeminiDecls,
+  buildSheetsNote,
+  getSheet,
+} from './referenceSheets';
+import {
+  UNIT_TOOL_NAME,
+  unitToolDef,
+  unitGeminiDecl,
+  buildUnitNote,
+  runUnitLookup,
+} from './unitLookup';
 // Note: Bun automatically reads .env files
 
 // Initialize AI providers
@@ -110,13 +134,21 @@ export interface ToolCallRecord {
 const MAX_TOOL_ITERATIONS = 5;
 const MAX_TITLE_CHARS = 80;
 const MAX_RECORDED_COMPOSITION_CHARS = 500;
+const MAX_RECORDED_SOURCE_CHARS = 500;
 
 /**
  * ToolCallRecords are persisted as audit rows in chat history; a generate_music
- * composition can be tens of KB, so truncate it — keep enough to identify the
- * piece without bloating the DB.
+ * composition or a render_diagram source can be tens of KB, so truncate them —
+ * keep enough to identify the piece without bloating the DB.
  */
 function redactToolCallArgs(name: string, args: Record<string, any>): Record<string, any> {
+  if (name === DIAGRAM_GEN_TOOL_NAME && typeof args.source === 'string'
+    && args.source.length > MAX_RECORDED_SOURCE_CHARS) {
+    return {
+      ...args,
+      source: `${args.source.slice(0, MAX_RECORDED_SOURCE_CHARS)}… [truncated, ${args.source.length} chars total]`,
+    };
+  }
   if (name === MUSIC_GEN_TOOL_NAME && typeof args.composition === 'string'
     && args.composition.length > MAX_RECORDED_COMPOSITION_CHARS) {
     return {
@@ -225,6 +257,7 @@ interface GenerateContentOptions {
   imageGen?: ImageGenContext;
   /** When set, the model is offered the music tools (get_music_guide + generate_music, Discord-only delivery). */
   musicGen?: MusicGenContext;
+  diagramGen?: DiagramGenContext;
   /** When set, the model is offered the club data tools (constitution, committee roster, events). */
   club?: ClubContext;
   /**
@@ -266,6 +299,20 @@ async function hydratePersona(persona: Persona): Promise<Persona> {
 }
 
 /**
+ * Does `content` invoke `trigger`? Sigil triggers (`@grok`) match as plain
+ * substrings — the `@` is boundary enough. Bare-name triggers (`marv`,
+ * `jarvis`) match on word boundaries only, so "marvel" or "jarvis's laptop"
+ * don't hijack a message aimed at another persona.
+ */
+function triggerMatches(contentLower: string, trigger: string): boolean {
+  const t = String(trigger).toLowerCase();
+  if (!t) return false;
+  if (!/^[a-z0-9]/.test(t)) return contentLower.includes(t);
+  const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b`).test(contentLower);
+}
+
+/**
  * Resolves the appropriate AI persona based on message content
  */
 async function resolvePersona(messageContent = ''): Promise<Persona> {
@@ -273,7 +320,7 @@ async function resolvePersona(messageContent = ''): Promise<Persona> {
   const personas: Persona[] = personasConfig.personas || [];
   const foundPersona = personas.find(
     (p) => Array.isArray(p.triggers)
-      && p.triggers.some((t) => contentLower.includes(String(t).toLowerCase())),
+      && p.triggers.some((t) => triggerMatches(contentLower, t)),
   );
 
   if (foundPersona) {
@@ -331,6 +378,7 @@ function getImageGenConfig(): { model: string; modalities: string[] } {
 
 async function generateContentInner({
   db, userId, provider, model, systemPrompt, prompt, history = [], webSearchEnabled = false, imageGen, musicGen,
+  diagramGen,
   club, mediaParts = [], providerRouting,
 }: GenerateContentOptions): Promise<GenerateContentResult> {
   let totalPromptTokens = 0;
@@ -378,14 +426,18 @@ ${systemPrompt || ''}
     if (musicGen) {
       toolDefs = [...toolDefs, ...musicToolDefs()];
     }
+    if (diagramGen) {
+      toolDefs = [...toolDefs, ...diagramToolDefs()];
+    }
     if (club) {
-      toolDefs = [...toolDefs, ...clubToolDefs()];
+      toolDefs = [...toolDefs, ...clubToolDefs(), ...sheetToolDefs(), unitToolDef()];
     }
     const imageGenNote = buildImageGenNote(imageGen);
     const musicGenNote = buildMusicGenNote(musicGen);
-    const clubNote = buildClubNote(club);
+    const diagramGenNote = buildDiagramGenNote(diagramGen);
+    const clubNote = club ? buildClubNote(club) + buildSheetsNote() + buildUnitNote() : '';
     const useTools = toolDefs.length > 0;
-    const toolNote = searchToolNote + imageGenNote + musicGenNote + clubNote;
+    const toolNote = searchToolNote + imageGenNote + musicGenNote + diagramGenNote + clubNote;
 
     // With media the current turn becomes a content-part array; the base64
     // parts live only in this request body and are dropped when it completes.
@@ -406,6 +458,7 @@ ${systemPrompt || ''}
     // generate_music is rejected until get_music_guide has been read in a
     // *prior* iteration — the composition must be written with the guide in context.
     let musicGuideRead = false;
+    let diagramGuideRead = false;
 
     for (let iter = 0; iter < MAX_TOOL_ITERATIONS + 1; iter += 1) {
       const isLastForcedClose = iter === MAX_TOOL_ITERATIONS;
@@ -498,6 +551,7 @@ ${systemPrompt || ''}
         // its get_music_guide must still be rejected (the composition was
         // written without the guide in context).
         const guideReadAtBatchStart = musicGuideRead;
+        const diagramGuideReadAtBatchStart = diagramGuideRead;
         // eslint-disable-next-line no-await-in-loop
         const results = await Promise.all(reqToolCalls.map(async (tc: any) => {
           const callName = tc.function?.name ?? '';
@@ -549,6 +603,42 @@ ${systemPrompt || ''}
               tcId: tc.id, callName, parsedArgs, resultText, ok,
             };
           }
+          if (diagramGen && callName === DIAGRAM_GUIDE_TOOL_NAME) {
+            resultText = await getDiagramGuide();
+            ok = !resultText.startsWith('Error:');
+            return {
+              tcId: tc.id, callName, parsedArgs, resultText, ok,
+            };
+          }
+          if (diagramGen && callName === DIAGRAM_GEN_TOOL_NAME) {
+            const genRes = await runDiagramGeneration({
+              ctx: diagramGen, args: parsedArgs, guideWasRead: diagramGuideReadAtBatchStart,
+            });
+            if (genRes.ok) {
+              generatedImages.push(genRes.attachment);
+              resultText = genRes.resultText;
+              ok = true;
+            } else {
+              resultText = genRes.error;
+            }
+            return {
+              tcId: tc.id, callName, parsedArgs, resultText, ok,
+            };
+          }
+          if (club && SHEET_TOOL_NAMES.includes(callName)) {
+            resultText = await getSheet(callName);
+            ok = !resultText.startsWith('Error:');
+            return {
+              tcId: tc.id, callName, parsedArgs, resultText, ok,
+            };
+          }
+          if (club && callName === UNIT_TOOL_NAME) {
+            resultText = await runUnitLookup(parsedArgs);
+            ok = !resultText.startsWith('Error:');
+            return {
+              tcId: tc.id, callName, parsedArgs, resultText, ok,
+            };
+          }
           if (club && CLUB_TOOL_NAMES.includes(callName)) {
             if (callName === CONSTITUTION_TOOL_NAME) resultText = await getConstitution();
             else if (callName === COMMITTEE_TOOL_NAME) resultText = await runListCommittee(club, parsedArgs);
@@ -570,6 +660,9 @@ ${systemPrompt || ''}
           // first-party content, so don't wrap them in the untrusted-result markers.
           const isTrustedResult = r.callName === MUSIC_GUIDE_TOOL_NAME
             || r.callName === MUSIC_GEN_TOOL_NAME
+            || r.callName === DIAGRAM_GUIDE_TOOL_NAME
+            || r.callName === DIAGRAM_GEN_TOOL_NAME
+            || SHEET_TOOL_NAMES.includes(r.callName)
             || CLUB_TOOL_NAMES.includes(r.callName);
           requestMessages.push({
             role: 'tool',
@@ -582,6 +675,7 @@ ${systemPrompt || ''}
             name: r.callName, args: redactToolCallArgs(r.callName, r.parsedArgs), resultText: r.resultText, ok: r.ok,
           });
           if (r.callName === MUSIC_GUIDE_TOOL_NAME && r.ok) musicGuideRead = true;
+          if (r.callName === DIAGRAM_GUIDE_TOOL_NAME && r.ok) diagramGuideRead = true;
         }
         // eslint-disable-next-line no-continue
         continue;
@@ -639,15 +733,20 @@ ${systemPrompt || ''}
       if (geminiTools.length === 0) geminiTools = [{ functionDeclarations: [] }];
       geminiTools[0].functionDeclarations.push(...musicGeminiDecls());
     }
+    if (diagramGen && !isImageModel) {
+      if (geminiTools.length === 0) geminiTools = [{ functionDeclarations: [] }];
+      geminiTools[0].functionDeclarations.push(...diagramGeminiDecls());
+    }
     if (club && !isImageModel) {
       if (geminiTools.length === 0) geminiTools = [{ functionDeclarations: [] }];
-      geminiTools[0].functionDeclarations.push(...clubGeminiDecls());
+      geminiTools[0].functionDeclarations.push(...clubGeminiDecls(), ...sheetGeminiDecls(), unitGeminiDecl());
     }
     const imageGenNote = !isImageModel ? buildImageGenNote(imageGen) : '';
     const musicGenNote = !isImageModel ? buildMusicGenNote(musicGen) : '';
-    const clubNote = !isImageModel ? buildClubNote(club) : '';
+    const diagramGenNote = !isImageModel ? buildDiagramGenNote(diagramGen) : '';
+    const clubNote = (!isImageModel && club) ? buildClubNote(club) + buildSheetsNote() + buildUnitNote() : '';
     const useTools = geminiTools.length > 0;
-    const toolNote = searchToolNote + imageGenNote + musicGenNote + clubNote;
+    const toolNote = searchToolNote + imageGenNote + musicGenNote + diagramGenNote + clubNote;
 
     const modelClientOptions: any = {
       model: currentGeminiModel,
@@ -691,6 +790,7 @@ ${systemPrompt || ''}
       // generate_music is rejected until get_music_guide has been read in a
       // *prior* iteration — the composition must be written with the guide in context.
       let musicGuideRead = false;
+      let diagramGuideRead = false;
 
       let result = await chatSession.sendMessage(processedPrompt);
       let fullText = '';
@@ -716,6 +816,7 @@ ${systemPrompt || ''}
         }
 
         const guideReadAtBatchStart = musicGuideRead;
+        const diagramGuideReadAtBatchStart = diagramGuideRead;
         // eslint-disable-next-line no-await-in-loop
         const fnResponses = await Promise.all(fnCalls.map(async (fc: any) => {
           const args = (fc.args ?? {}) as Record<string, any>;
@@ -764,6 +865,55 @@ ${systemPrompt || ''}
               },
             };
           }
+          if (diagramGen && fc.name === DIAGRAM_GUIDE_TOOL_NAME) {
+            const guide = await getDiagramGuide();
+            const guideOk = !guide.startsWith('Error:');
+            toolCalls.push({
+              name: fc.name, args, resultText: guide, ok: guideOk,
+            });
+            return {
+              functionResponse: {
+                name: fc.name,
+                response: { result: guide },
+              },
+            };
+          }
+          if (diagramGen && fc.name === DIAGRAM_GEN_TOOL_NAME) {
+            const genRes = await runDiagramGeneration({
+              ctx: diagramGen, args, guideWasRead: diagramGuideReadAtBatchStart,
+            });
+            const genContent = genRes.ok ? genRes.resultText : genRes.error;
+            if (genRes.ok) generatedImages.push(genRes.attachment);
+            toolCalls.push({
+              name: fc.name, args: redactToolCallArgs(fc.name, args), resultText: genContent, ok: genRes.ok,
+            });
+            return {
+              functionResponse: {
+                name: fc.name,
+                response: { result: genContent },
+              },
+            };
+          }
+          if (club && SHEET_TOOL_NAMES.includes(fc.name)) {
+            const sheet = await getSheet(fc.name);
+            toolCalls.push({
+              name: fc.name, args, resultText: sheet, ok: !sheet.startsWith('Error:'),
+            });
+            return { functionResponse: { name: fc.name, response: { result: sheet } } };
+          }
+          if (club && fc.name === UNIT_TOOL_NAME) {
+            const unit = await runUnitLookup(args);
+            toolCalls.push({
+              name: fc.name, args, resultText: unit, ok: !unit.startsWith('Error:'),
+            });
+            // Scraped from the UWA site, so treat it as third-party text.
+            return {
+              functionResponse: {
+                name: fc.name,
+                response: { result: `<<MCP_TOOL_RESULT>>\n${unit}\n<</MCP_TOOL_RESULT>>` },
+              },
+            };
+          }
           if (club && CLUB_TOOL_NAMES.includes(fc.name)) {
             let clubContent: string;
             if (fc.name === CONSTITUTION_TOOL_NAME) clubContent = await getConstitution();
@@ -796,6 +946,10 @@ ${systemPrompt || ''}
         if (!musicGuideRead
           && toolCalls.some((t) => t.name === MUSIC_GUIDE_TOOL_NAME && t.ok)) {
           musicGuideRead = true;
+        }
+        if (!diagramGuideRead
+          && toolCalls.some((t) => t.name === DIAGRAM_GUIDE_TOOL_NAME && t.ok)) {
+          diagramGuideRead = true;
         }
 
         // eslint-disable-next-line no-await-in-loop

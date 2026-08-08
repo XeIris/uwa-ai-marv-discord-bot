@@ -11,10 +11,15 @@ export interface EventRow {
   url: string | null;
   created_by: string | null;
   created_at: string;
+  image_channel_id: string | null;
+  image_message_id: string | null;
+  image_attachment_id: string | null;
+  reminder_day_sent_at: string | null;
+  reminder_soon_sent_at: string | null;
 }
 
 // starts_at / ends_at are ISO-8601 UTC strings. Operators enter Perth local time;
-// conversion happens at the command boundary (utils/clubInfo.parsePerthDateTime).
+// conversion happens at the command boundary (utils/perthTime.parsePerthDateTime).
 const eventTable: TableDefinition = {
   name: 'Event',
   columns: [
@@ -28,6 +33,15 @@ const eventTable: TableDefinition = {
     { name: 'url', type: 'TEXT' },
     { name: 'created_by', type: 'TEXT' },
     { name: 'created_at', type: 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP' },
+    // Discord message holding the event's image. Stored as ids, never as a CDN
+    // URL: attachment links are signed and expire, so the URL is re-resolved by
+    // fetching this message when it's needed (utils/eventImage.ts).
+    { name: 'image_channel_id', type: 'TEXT' },
+    { name: 'image_message_id', type: 'TEXT' },
+    { name: 'image_attachment_id', type: 'TEXT' },
+    // Set once each reminder has been posted, so restarts can't double-post.
+    { name: 'reminder_day_sent_at', type: 'TEXT' },
+    { name: 'reminder_soon_sent_at', type: 'TEXT' },
   ],
   primaryKey: ['id'],
   specialConstraints: [],

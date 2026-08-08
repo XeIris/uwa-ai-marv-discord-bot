@@ -19,6 +19,30 @@ const eventQueries = {
     ORDER BY starts_at ASC
     LIMIT ?
   `,
+  SET_IMAGE: `
+    UPDATE Event
+    SET image_channel_id = ?, image_message_id = ?, image_attachment_id = ?
+    WHERE id = ? AND server_id = ?
+  `,
+  CLEAR_IMAGE: `
+    UPDATE Event
+    SET image_channel_id = NULL, image_message_id = NULL, image_attachment_id = NULL
+    WHERE id = ? AND server_id = ?
+  `,
+  // Events needing a reminder: started-in-window, not yet sent, not already over.
+  // The column name is interpolated from a fixed allowlist in EventModel — never
+  // from caller input — because SQLite can't parameterise an identifier.
+  LIST_DUE_REMINDERS: (column: string): string => `
+    SELECT * FROM Event
+    WHERE ${column} IS NULL
+      AND starts_at > ?
+      AND starts_at <= ?
+    ORDER BY starts_at ASC
+    LIMIT ?
+  `,
+  MARK_REMINDER_SENT: (column: string): string => `
+    UPDATE Event SET ${column} = ? WHERE id = ? AND ${column} IS NULL
+  `,
   CREATE_SERVER_STARTS_INDEX: `
     CREATE INDEX IF NOT EXISTS idx_event_server_starts
     ON Event (server_id, starts_at)

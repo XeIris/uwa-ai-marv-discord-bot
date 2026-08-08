@@ -13,6 +13,11 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 COPY scripts/fetch-soundfont.ts ./scripts/fetch-soundfont.ts
 RUN bun scripts/fetch-soundfont.ts
 
+# Fetch the DejaVu fonts for the diagram renderer (checksum-verified, cached as
+# a layer — only re-downloads when the fetch script changes).
+COPY scripts/fetch-fonts.ts ./scripts/fetch-fonts.ts
+RUN bun scripts/fetch-fonts.ts
+
 # --- STAGE 2: Run ---
 FROM oven/bun:1-slim
 WORKDIR /app
@@ -26,7 +31,8 @@ USER bun
 # Copy node_modules and code from builder
 COPY --from=builder --chown=bun:bun /app/node_modules ./node_modules
 COPY --chown=bun:bun . .
-# Soundfont downloaded + checksum-verified in the builder stage.
+# Soundfont + diagram fonts downloaded and checksum-verified in the builder stage.
 COPY --from=builder --chown=bun:bun /app/data/soundfonts ./data/soundfonts
+COPY --from=builder --chown=bun:bun /app/data/fonts ./data/fonts
 
 CMD ["bun", "index.ts"]

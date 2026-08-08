@@ -108,6 +108,11 @@ describe('formatEventList', () => {
     url: null,
     createdBy: null,
     createdAt: '',
+    imageChannelId: null,
+    imageMessageId: null,
+    imageAttachmentId: null,
+    reminderDaySentAt: null,
+    reminderSoonSentAt: null,
   };
 
   test('renders name, Discord timestamp and location', () => {

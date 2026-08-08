@@ -5,11 +5,13 @@ export const SERVER_CONFIG_KEYS = {
   POKEMON_SHINY_CHANCE: 'pokemon_shiny_chance',
   POKEMON_MYSTERY_CHANCE: 'pokemon_mystery_chance',
   SERIOUS_CHANNELS: 'serious_channels',
+  EVENT_REMINDER_CHANNELS: 'event_reminder_channels',
   MESSAGE_REACTS_ENABLED: 'message_reacts_enabled',
 } as const;
 
 export const SERVER_CHANNEL_LIST_KEYS = [
   SERVER_CONFIG_KEYS.SERIOUS_CHANNELS,
+  SERVER_CONFIG_KEYS.EVENT_REMINDER_CHANNELS,
 ] as const;
 
 export type ServerChannelListKey = typeof SERVER_CHANNEL_LIST_KEYS[number];
@@ -77,6 +79,11 @@ export const DOCUMENTED_SERVER_CONFIG_KEYS: {
     defaultValue: 'none',
   },
   {
+    key: SERVER_CONFIG_KEYS.EVENT_REMINDER_CHANNELS,
+    description: 'Channels that get automatic event reminders. Unset = reminders off for this server',
+    defaultValue: 'none',
+  },
+  {
     key: SERVER_CONFIG_KEYS.MESSAGE_REACTS_ENABLED,
     description: 'Keyword/script replies on messages (e.g. @grok, nya). 0 = off, 1 = on',
     defaultValue: '1',
@@ -85,7 +92,7 @@ export const DOCUMENTED_SERVER_CONFIG_KEYS: {
 
 /** Keys managed via `/serverconfig setvalue`. */
 export const SETTABLE_VALUE_KEYS = DOCUMENTED_SERVER_CONFIG_KEYS.filter(
-  (entry) => entry.key !== SERVER_CONFIG_KEYS.SERIOUS_CHANNELS,
+  (entry) => !(SERVER_CHANNEL_LIST_KEYS as readonly string[]).includes(entry.key),
 );
 
 function parseEnabledFlag(raw: string | null | undefined, defaultEnabled: boolean): boolean {
@@ -113,6 +120,7 @@ export interface ResolvedServerConfig {
   pokemonShinyChance: number;
   pokemonMysteryChance: number;
   seriousChannelIds: string[];
+  eventReminderChannelIds: string[];
   messageReactsEnabled: boolean;
 }
 
@@ -160,12 +168,15 @@ export function validateServerConfigValue(key: string, value: string): string | 
   return null;
 }
 
-export function formatChannelListValue(raw: string | null | undefined): string {
-  if (!raw?.trim()) return formatUnsetDisplay(documentedDefault(SERVER_CONFIG_KEYS.SERIOUS_CHANNELS));
+export function formatChannelListValue(
+  raw: string | null | undefined,
+  key: ServerChannelListKey = SERVER_CONFIG_KEYS.SERIOUS_CHANNELS,
+): string {
+  if (!raw?.trim()) return formatUnsetDisplay(documentedDefault(key));
   const ids = parseChannelIds(raw);
   return ids.length > 0
     ? ids.map((id) => `<#${id}>`).join(', ')
-    : formatUnsetDisplay(documentedDefault(SERVER_CONFIG_KEYS.SERIOUS_CHANNELS));
+    : formatUnsetDisplay(documentedDefault(key));
 }
 
 export function formatServerConfigOverview(rows: { key: string; value: string }[]): string {
@@ -182,7 +193,7 @@ export function formatServerConfigOverview(rows: { key: string; value: string }[
 
   lines.push('', '**Channel lists**');
   SERVER_CHANNEL_LIST_KEYS.forEach((listKey) => {
-    lines.push(`${listKey}: ${formatChannelListValue(valueByKey.get(listKey))}`);
+    lines.push(`${listKey}: ${formatChannelListValue(valueByKey.get(listKey), listKey)}`);
   });
 
   lines.push('', '**Roles**');
@@ -216,6 +227,7 @@ export async function loadResolvedServerConfig(
       DEFAULT_RATES[SERVER_CONFIG_KEYS.POKEMON_MYSTERY_CHANCE],
     ),
     seriousChannelIds: parseChannelIds(values.get(SERVER_CONFIG_KEYS.SERIOUS_CHANNELS)),
+    eventReminderChannelIds: parseChannelIds(values.get(SERVER_CONFIG_KEYS.EVENT_REMINDER_CHANNELS)),
     messageReactsEnabled: parseEnabledFlag(values.get(SERVER_CONFIG_KEYS.MESSAGE_REACTS_ENABLED), true),
   };
 }

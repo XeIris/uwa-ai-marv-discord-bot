@@ -7,6 +7,7 @@ import imageGenQueries from './queries/imageGenQueries';
 import musicGenQueries from './queries/musicGenQueries';
 import aiUsageQueries from './queries/aiUsageQueries';
 import committeeQueries from './queries/committeeQueries';
+import diagramGenQueries from './queries/diagramGenQueries';
 import eventQueries from './queries/eventQueries';
 import * as modelClasses from './models';
 import type { TableDefinition, QueryResult } from './types';
@@ -14,6 +15,7 @@ import type AiChatModel from './models/AiChatModel';
 import type AiUsageModel from './models/AiUsageModel';
 import type CommandConfigModel from './models/CommandConfigModel';
 import type CommitteeModel from './models/CommitteeModel';
+import type DiagramGenModel from './models/DiagramGenModel';
 import type EventModel from './models/EventModel';
 import type GlobalConfigModel from './models/GlobalConfigModel';
 import type ImageGenModel from './models/ImageGenModel';
@@ -202,6 +204,9 @@ class Database {
     // Back the per-user rolling-24h music-generation rate-limit count.
     this.db.run(musicGenQueries.CREATE_USER_CREATED_INDEX);
 
+    // Back the per-user rolling-24h diagram-render rate-limit count.
+    this.db.run(diagramGenQueries.CREATE_USER_CREATED_INDEX);
+
     // AI Usage tracking
     this.db.run(aiUsageQueries.CREATE_INDEX_USER_CREATED);
 
@@ -370,6 +375,8 @@ class Database {
   get globalConfig(): GlobalConfigModel { return this.models.GlobalConfigModel; }
   get imageGen(): ImageGenModel { return this.models.ImageGenModel; }
   get musicGen(): MusicGenModel { return this.models.MusicGenModel; }
+
+  get diagramGen(): DiagramGenModel { return this.models.DiagramGenModel; }
   get serverConfig(): ServerConfigModel { return this.models.ServerConfigModel; }
 }
 

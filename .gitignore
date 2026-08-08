@@ -23,5 +23,9 @@ persistence/
 data/soundfonts/*.sf2
 data/soundfonts/*.sf3
 
+# DejaVu fonts for the diagram renderer (~1.7 MB, not committed).
+# Fetch with: bun scripts/fetch-fonts.ts (Dockerfile does this at build).
+data/fonts/*.ttf
+
 # Real committee roster (names + Discord IDs) — seed input, never committed.
 data/committee-seed.json

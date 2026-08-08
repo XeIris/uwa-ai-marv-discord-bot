@@ -9,8 +9,7 @@
       "@mi",
       "@fr",
       "@qw",
-      "@marv",
-      "@asimarv"
+      "/\\b(asi)?marv\\b/g"
     ],
     "script": "grok"
   }

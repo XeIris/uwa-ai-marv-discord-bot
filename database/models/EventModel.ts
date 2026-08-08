@@ -13,7 +13,24 @@ export interface EventEntry {
   url: string | null;
   createdBy: string | null;
   createdAt: string;
+  imageChannelId: string | null;
+  imageMessageId: string | null;
+  imageAttachmentId: string | null;
+  reminderDaySentAt: string | null;
+  reminderSoonSentAt: string | null;
 }
+
+/**
+ * The two reminder marker columns. SQLite cannot parameterise an identifier, so
+ * the column name is interpolated into the SQL — it must therefore only ever
+ * come from this constant, never from a caller.
+ */
+export const REMINDER_COLUMNS = {
+  day: 'reminder_day_sent_at',
+  soon: 'reminder_soon_sent_at',
+} as const;
+
+export type ReminderKind = keyof typeof REMINDER_COLUMNS;
 
 export interface EventInput {
   name?: string;
@@ -84,6 +101,56 @@ class EventModel {
 
   async listAll(serverId: string, limit = 50): Promise<EventEntry[]> {
     return this.db.executeSelectAllQuery(eventQueries.LIST_ALL, [serverId, limit]) as Promise<EventEntry[]>;
+  }
+
+  /** Points an event at the Discord message holding its image (ids, not a URL). */
+  async setImage(
+    serverId: string,
+    id: number,
+    ref: { channelId: string; messageId: string; attachmentId: string },
+  ): Promise<boolean> {
+    const result = await this.db.executeQuery(
+      eventQueries.SET_IMAGE,
+      [ref.channelId, ref.messageId, ref.attachmentId, id, serverId],
+    );
+    return result.changes > 0;
+  }
+
+  /** Forgets an event's image reference (used when the source message is gone). */
+  async clearImage(serverId: string, id: number): Promise<boolean> {
+    const result = await this.db.executeQuery(eventQueries.CLEAR_IMAGE, [id, serverId]);
+    return result.changes > 0;
+  }
+
+  /**
+   * Events starting inside `windowMs` from now whose `kind` reminder hasn't been
+   * sent. Deliberately **not** scoped to one guild: the scheduler sweeps every
+   * server in one pass and routes by each row's serverId.
+   */
+  async listDueReminders(
+    kind: ReminderKind,
+    windowMs: number,
+    limit = 50,
+    now: Date = new Date(),
+  ): Promise<EventEntry[]> {
+    const until = new Date(now.getTime() + windowMs);
+    return this.db.executeSelectAllQuery(
+      eventQueries.LIST_DUE_REMINDERS(REMINDER_COLUMNS[kind]),
+      [now.toISOString(), until.toISOString(), limit],
+    ) as Promise<EventEntry[]>;
+  }
+
+  /**
+   * Marks a reminder sent. The `IS NULL` guard in the UPDATE makes this the
+   * claim step: it returns false if another tick already took this event, so a
+   * slow post can never be duplicated.
+   */
+  async claimReminder(kind: ReminderKind, id: number, now: Date = new Date()): Promise<boolean> {
+    const result = await this.db.executeQuery(
+      eventQueries.MARK_REMINDER_SENT(REMINDER_COLUMNS[kind]),
+      [now.toISOString(), id],
+    );
+    return result.changes > 0;
   }
 
   /** Events that haven't finished yet, soonest first. */

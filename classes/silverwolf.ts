@@ -9,6 +9,7 @@ import { log, logError } from '../utils/log';
 import keywordsJson from '../data/keywords.json';
 import statusJson from '../data/status.json';
 import scriptHandlers from './handlers/keywordsBehaviorHandler';
+import { EventScheduler } from './eventScheduler';
 import { loadAllowedServers } from '../utils/accessControl';
 import { loadResolvedServerConfig } from '../utils/serverConfig';
 
@@ -28,6 +29,8 @@ class Silverwolf extends Client {
   declare token: string;
   commands: Map<string, any>;
   keywords: any[];
+
+  eventScheduler: EventScheduler;
   deletedMessages: any[];
   editedMessages: any[];
   db: any;
@@ -41,6 +44,7 @@ class Silverwolf extends Client {
     this.deletedMessages = [];
     this.editedMessages = [];
     this.db = new Database('./persistence/database.db');
+    this.eventScheduler = new EventScheduler(this);
     this.init();
     this.games = [];
     this.loadGames(); // Initialize the games list from the JSON file
@@ -417,6 +421,9 @@ All wrongs reserved.
     await super.login(this.token);
     log(`Logged in as ${this.user!.tag}`);
     this.setRandomGame(); // Start cycling through games after logging in
+    // Started only after login: the sweep fetches channels, which needs a ready
+    // client. It no-ops for any guild without event_reminder_channels set.
+    this.eventScheduler.start();
     return this.token;
   }
 }
