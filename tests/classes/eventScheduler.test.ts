@@ -5,6 +5,9 @@ import { EventScheduler } from '../../classes/eventScheduler';
 import type { EventEntry, ReminderKind } from '../../database/models/EventModel';
 
 const NOW = new Date('2026-09-01T00:00:00.000Z');
+/** Real Discord channel ids are 17-20 digit snowflakes — parseChannelIds validates that. */
+const CH_A = '100000000000000001';
+const CH_B = '100000000000000002';
 
 function makeEvent(overrides: Partial<EventEntry> = {}): EventEntry {
   return {
@@ -31,6 +34,8 @@ interface Harness {
   client: any;
   sent: { channelId: string; embedTitle: string; image: string | null }[];
   claims: { kind: ReminderKind; id: number }[];
+  releases: { kind: ReminderKind; id: number }[];
+  bands: { kind: ReminderKind; fromMs: number; toMs: number; configKey: string }[];
   configRows: Record<string, any>[];
 }
 
@@ -42,6 +47,8 @@ function harness(opts: {
 } = {}): Harness {
   const sent: Harness['sent'] = [];
   const claims: Harness['claims'] = [];
+  const releases: Harness['releases'] = [];
+  const bands: Harness['bands'] = [];
   const configRows = opts.reminderChannels
     ? [{ key: 'event_reminder_channels', value: opts.reminderChannels }]
     : [];
@@ -50,12 +57,29 @@ function harness(opts: {
     db: {
       serverConfig: { getAllServerConfig: async () => configRows },
       event: {
-        listDueReminders: async (kind: ReminderKind) => opts.events?.[kind] ?? [],
+        listDueReminders: async (
+          kind: ReminderKind,
+          fromMs: number,
+          toMs: number,
+          configKey: string,
+        ) => {
+          bands.push({
+            kind, fromMs, toMs, configKey,
+          });
+          // The real query filters opted-out guilds in SQL; mimic that here.
+          if (!opts.reminderChannels) return [];
+          return opts.events?.[kind] ?? [];
+        },
         claimReminder: async (kind: ReminderKind, id: number) => {
           claims.push({ kind, id });
           return opts.claimResult ?? true;
         },
+        releaseReminder: async (kind: ReminderKind, id: number) => {
+          releases.push({ kind, id });
+          return true;
+        },
         clearImage: async () => true,
+        clearImageIfMatches: async () => true,
       },
     },
     channels: {
@@ -78,7 +102,7 @@ function harness(opts: {
   };
 
   return {
-    client, sent, claims, configRows,
+    client, sent, claims, releases, bands, configRows,
   };
 }
 
@@ -94,14 +118,14 @@ describe('EventScheduler', () => {
   });
 
   test('posts a reminder to every configured channel', async () => {
-    const hh = harness({ events: { soon: [makeEvent()] }, reminderChannels: '111,222' });
+    const hh = harness({ events: { soon: [makeEvent()] }, reminderChannels: `${CH_A},${CH_B}` });
     await new EventScheduler(hh.client).tick(NOW);
-    expect(hh.sent.map((s) => s.channelId)).toEqual(['111', '222']);
+    expect(hh.sent.map((x) => x.channelId)).toEqual([CH_A, CH_B]);
     expect(hh.sent[0].embedTitle).toBe('Workshop — starting soon');
   });
 
   test('uses the right label per window', async () => {
-    const hh = harness({ events: { day: [makeEvent()] }, reminderChannels: '111' });
+    const hh = harness({ events: { day: [makeEvent()] }, reminderChannels: CH_A });
     await new EventScheduler(hh.client).tick(NOW);
     expect(hh.sent[0].embedTitle).toBe('Workshop — tomorrow');
   });
@@ -114,8 +138,45 @@ describe('EventScheduler', () => {
     expect(hh.claims).toEqual([]);
   });
 
+  test('passes a lead-time band and the opt-in config key to the query', async () => {
+    const hh = harness({ events: { soon: [makeEvent()] }, reminderChannels: CH_A });
+    await new EventScheduler(hh.client).tick(NOW);
+    const day = hh.bands.find((b) => b.kind === 'day')!;
+    const soon = hh.bands.find((b) => b.kind === 'soon')!;
+    // A band, not just an upper bound: the 24h sweep must not fire for an event
+    // two hours out.
+    expect(day.fromMs).toBeGreaterThan(0);
+    expect(day.toMs).toBe(24 * 60 * 60 * 1000);
+    expect(day.fromMs).toBeLessThan(day.toMs);
+    expect(soon.fromMs).toBe(0);
+    expect(soon.toMs).toBe(60 * 60 * 1000);
+    // The guild filter is pushed into SQL so opted-out guilds can't eat the batch.
+    expect(day.configKey).toBe('event_reminder_channels');
+  });
+
+  test('releases the claim when delivery reaches no channel, so a later tick retries', async () => {
+    const hh = harness({ events: { soon: [makeEvent()] }, reminderChannels: CH_A });
+    hh.client.channels.fetch = async () => { throw new Error('missing permissions'); };
+    await new EventScheduler(hh.client).tick(NOW);
+    expect(hh.sent).toEqual([]);
+    expect(hh.claims).toHaveLength(1);
+    expect(hh.releases).toEqual([{ kind: 'soon', id: 1 }]);
+  });
+
+  test('keeps the claim on partial delivery, so nobody is double-posted', async () => {
+    const hh = harness({ events: { soon: [makeEvent()] }, reminderChannels: `${CH_A},${CH_B}` });
+    const originalFetch = hh.client.channels.fetch;
+    hh.client.channels.fetch = async (id: string) => {
+      if (id === CH_A) throw new Error('missing permissions');
+      return originalFetch(id);
+    };
+    await new EventScheduler(hh.client).tick(NOW);
+    expect(hh.sent).toHaveLength(1);
+    expect(hh.releases).toEqual([]);
+  });
+
   test('claims before posting, so a lost race posts nothing', async () => {
-    const hh = harness({ events: { soon: [makeEvent()] }, reminderChannels: '111', claimResult: false });
+    const hh = harness({ events: { soon: [makeEvent()] }, reminderChannels: CH_A, claimResult: false });
     await new EventScheduler(hh.client).tick(NOW);
     expect(hh.claims).toHaveLength(1);
     expect(hh.sent).toEqual([]);
@@ -124,7 +185,7 @@ describe('EventScheduler', () => {
   test('attaches the event image when one resolves', async () => {
     const hh = harness({
       events: { soon: [makeEvent({ imageChannelId: 'c1', imageMessageId: 'm1', imageAttachmentId: 'a1' })] },
-      reminderChannels: '111',
+      reminderChannels: CH_A,
       attachmentUrl: 'https://cdn.discordapp.com/poster.png?ex=FRESH',
     });
     await new EventScheduler(hh.client).tick(NOW);
@@ -134,7 +195,7 @@ describe('EventScheduler', () => {
   test('still posts when the image is gone', async () => {
     const hh = harness({
       events: { soon: [makeEvent({ imageChannelId: 'c1', imageMessageId: 'm1', imageAttachmentId: 'a1' })] },
-      reminderChannels: '111',
+      reminderChannels: CH_A,
     });
     await new EventScheduler(hh.client).tick(NOW);
     expect(hh.sent).toHaveLength(1);
@@ -142,7 +203,7 @@ describe('EventScheduler', () => {
   });
 
   test('overlapping ticks do not double-sweep', async () => {
-    const hh = harness({ events: { soon: [makeEvent()] }, reminderChannels: '111' });
+    const hh = harness({ events: { soon: [makeEvent()] }, reminderChannels: CH_A });
     const scheduler = new EventScheduler(hh.client);
     await Promise.all([scheduler.tick(NOW), scheduler.tick(NOW)]);
     expect(hh.sent).toHaveLength(1);
@@ -155,14 +216,14 @@ describe('EventScheduler', () => {
   });
 
   test('a send failure to one channel does not block the others', async () => {
-    const hh = harness({ events: { soon: [makeEvent()] }, reminderChannels: '111,222' });
+    const hh = harness({ events: { soon: [makeEvent()] }, reminderChannels: `${CH_A},${CH_B}` });
     const originalFetch = hh.client.channels.fetch;
     hh.client.channels.fetch = async (id: string) => {
-      if (id === '111') throw new Error('missing permissions');
+      if (id === CH_A) throw new Error('missing permissions');
       return originalFetch(id);
     };
     await new EventScheduler(hh.client).tick(NOW);
-    expect(hh.sent.map((s) => s.channelId)).toEqual(['222']);
+    expect(hh.sent.map((x) => x.channelId)).toEqual([CH_B]);
   });
 
   test('stop() is safe before start() and idempotent', () => {

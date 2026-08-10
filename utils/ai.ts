@@ -301,15 +301,20 @@ async function hydratePersona(persona: Persona): Promise<Persona> {
 /**
  * Does `content` invoke `trigger`? Sigil triggers (`@grok`) match as plain
  * substrings — the `@` is boundary enough. Bare-name triggers (`marv`,
- * `jarvis`) match on word boundaries only, so "marvel" or "jarvis's laptop"
- * don't hijack a message aimed at another persona.
+ * `jarvis`) match on word boundaries only, so "marvel" doesn't hijack a message
+ * aimed at another persona.
+ *
+ * Apostrophes count as part of the word, both ASCII and typographic: `\b` treats
+ * them as boundaries, so a plain word-boundary test fires on "jarvis's laptop",
+ * which is talking *about* a persona rather than invoking it. Persona order then
+ * decides the hijack — "@ds what is jarvis's origin" would answer as Jarvis.
  */
 function triggerMatches(contentLower: string, trigger: string): boolean {
   const t = String(trigger).toLowerCase();
   if (!t) return false;
   if (!/^[a-z0-9]/.test(t)) return contentLower.includes(t);
   const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`\\b${escaped}\\b`).test(contentLower);
+  return new RegExp(`(?:^|[^a-z0-9'\u2019])${escaped}(?=$|[^a-z0-9'\u2019])`).test(contentLower);
 }
 
 /**

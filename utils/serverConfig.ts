@@ -1,4 +1,4 @@
-import { parseChannelIds } from './parseChannelIds';
+import { parseChannelIds, parseSnowflakeIds } from './parseChannelIds';
 
 export const SERVER_CONFIG_KEYS = {
   POKEMON_SPAWN_RATE: 'pokemon_spawn_rate',
@@ -227,7 +227,9 @@ export async function loadResolvedServerConfig(
       DEFAULT_RATES[SERVER_CONFIG_KEYS.POKEMON_MYSTERY_CHANCE],
     ),
     seriousChannelIds: parseChannelIds(values.get(SERVER_CONFIG_KEYS.SERIOUS_CHANNELS)),
-    eventReminderChannelIds: parseChannelIds(values.get(SERVER_CONFIG_KEYS.EVENT_REMINDER_CHANNELS)),
+    // Strict: these are posted to unattended on a timer, so a malformed id would
+    // just fail a fetch every tick. Duplicates are dropped by both parsers.
+    eventReminderChannelIds: parseSnowflakeIds(values.get(SERVER_CONFIG_KEYS.EVENT_REMINDER_CHANNELS)),
     messageReactsEnabled: parseEnabledFlag(values.get(SERVER_CONFIG_KEYS.MESSAGE_REACTS_ENABLED), true),
   };
 }

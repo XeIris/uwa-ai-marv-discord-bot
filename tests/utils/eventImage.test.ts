@@ -115,22 +115,40 @@ describe('resolveEventImageUrl', () => {
 describe('resolveAndPrune', () => {
   test('clears the stored reference when the source is gone', async () => {
     const cleared: any[] = [];
-    const db = { event: { clearImage: async (s: string, i: number) => { cleared.push([s, i]); } } };
+    const db = {
+      event: {
+        clearImageIfMatches: async (s: string, i: number, ref: any) => { cleared.push([s, i, ref]); },
+      },
+    };
     const url = await resolveAndPrune(fakeClient({ fetchMessageError: { code: 10008 } }), db, withImage());
     expect(url).toBeNull();
-    expect(cleared).toEqual([['g1', 7]]);
+    expect(cleared).toEqual([['g1', 7, { channelId: 'c1', messageId: 'm1', attachmentId: 'a1' }]]);
+  });
+
+  test('clears CONDITIONALLY, so a concurrent /event setimage is not wiped', async () => {
+    // The prune must name the reference it resolved. An unconditional clear would
+    // delete a newer image an organiser set between the resolve and the prune.
+    const cleared: any[] = [];
+    const db = {
+      event: {
+        clearImageIfMatches: async (_s: string, _i: number, ref: any) => { cleared.push(ref); return false; },
+        clearImage: async () => { throw new Error('must not use the unconditional clear here'); },
+      },
+    };
+    await resolveAndPrune(fakeClient({ fetchMessageError: { code: 10008 } }), db, withImage());
+    expect(cleared).toEqual([{ channelId: 'c1', messageId: 'm1', attachmentId: 'a1' }]);
   });
 
   test('does not clear on a transient failure', async () => {
     let calls = 0;
-    const db = { event: { clearImage: async () => { calls += 1; } } };
+    const db = { event: { clearImageIfMatches: async () => { calls += 1; } } };
     await resolveAndPrune(fakeClient({ fetchMessageError: { code: 500 } }), db, withImage());
     expect(calls).toBe(0);
   });
 
   test('returns the url and clears nothing on success', async () => {
     let calls = 0;
-    const db = { event: { clearImage: async () => { calls += 1; } } };
+    const db = { event: { clearImageIfMatches: async () => { calls += 1; } } };
     const url = await resolveAndPrune(fakeClient({ attachmentUrl: 'https://cdn/x.png' }), db, withImage());
     expect(url).toBe('https://cdn/x.png');
     expect(calls).toBe(0);

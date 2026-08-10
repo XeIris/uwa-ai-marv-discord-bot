@@ -42,8 +42,8 @@ never goes stale. Everything is **per-guild** — always scope by `interaction.g
 
 Operators type **Perth local time** (`YYYY-MM-DD HH:MM`); storage is UTC. Convert at the command
 boundary with `parsePerthDateTime()` (`utils/perthTime.ts`, re-exported by `clubInfo`), which
-returns `null` on anything malformed — reject, never coerce. AWST is UTC+8 with no DST, so the fixed offset is correct; don't
-reach for a timezone library. Output uses `discordTimestamp()` (`<t:epoch:F>`) so each reader sees
+returns `null` on anything malformed — reject, never coerce. AWST is UTC+8 with no DST, so the fixed
+offset is correct; don't reach for a timezone library. Output uses `discordTimestamp()` (`<t:epoch:F>`) so each reader sees
 their own zone — never render a bare Perth time to users.
 
 ## Commands
@@ -125,15 +125,31 @@ to it, and `utils/eventImage.ts` re-fetches that message to mint a fresh signed 
 organiser is told not to delete the confirmation message; if they do, resolution reports `missing`
 and the dead reference is cleared so we stop retrying it every tick.
 
-`classes/eventScheduler.ts` sweeps every 5 minutes for two windows (24 h and 1 h before start) and
-is **off unless a guild sets `event_reminder_channels`** (`/serverconfig setchannel`) — no DM
-fallback, no guessing a channel, and the skip is logged once per guild rather than once per tick.
-Duplicate suppression lives in the DB: `reminder_day_sent_at` / `reminder_soon_sent_at` are claimed
-by an UPDATE conditional on the column still being NULL, and the claim happens **before** the post,
-so restarts and overlapping ticks can't double-announce. An unconfigured guild deliberately does
-*not* consume the marker, so reminders start working the moment a channel is set. The window is
-`now < starts_at <= now + window`, so a bot that was offline overnight comes back quiet instead of
-announcing yesterday.
+`classes/eventScheduler.ts` sweeps every 5 minutes (plus one sweep 30 s after boot, so a restart
+doesn't skip an event starting inside the first interval) and is **off unless a guild sets
+`event_reminder_channels`** (`/serverconfig setchannel`) — no DM fallback, no guessing a channel.
+
+Three properties that are easy to break:
+
+- **Each reminder fires inside a lead-time *band*** — 18–24 h for `day`, 0–1 h for `soon` — not
+  merely "before `now + window`". With only an upper bound the 24 h sweep announced "tomorrow" for
+  an event two hours away. Bands are far wider than the tick interval, so a delayed tick still
+  catches the event.
+- **The opt-in filter is in the SQL, not the scheduler.** `LIST_DUE_REMINDERS` has an `EXISTS` on
+  `ServerConfig`, because `LIMIT` is applied in that query: opted-out guilds keep their marker NULL
+  by design, so as a post-filter they'd be re-selected every tick and could fill the batch and
+  starve guilds that did opt in.
+- **Claim before post, release only on total failure.** The marker is set by an UPDATE conditional
+  on it still being NULL, so restarts and overlapping ticks can't double-announce. If delivery then
+  reaches *no* channel the claim is handed back (matching on the timestamp written, so a different
+  tick's claim is never cleared) and a later tick retries; partial delivery keeps the claim, because
+  re-posting to channels that already got it is worse than one channel missing out.
+
+An event that already started is never announced, so a bot offline overnight comes back quiet.
+
+`resolveAndPrune` clears a dead image reference via `clearImageIfMatches`, naming all three stored
+ids: an organiser can run `/event setimage` between the failed resolve and the prune, and that newer
+reference must survive. `clearImage` (unconditional) is for explicit admin removal only.
 
 ## Seeding
 

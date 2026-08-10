@@ -80,6 +80,46 @@ export function handbookUrl(code: string): string {
   return `https://${HANDBOOK_HOST}/unitdetails?code=${code}`;
 }
 
+/**
+ * Reads a response body as text, aborting once `maxBytes` is exceeded. Returns
+ * null when the cap is hit.
+ *
+ * `Content-Length` is optional and can be wrong, so the declared-size check is
+ * only a fast path — a chunked or misreported response would otherwise be fully
+ * buffered by `res.text()` before any truncation, which is a memory-exhaustion
+ * risk on a shared 1 g container.
+ */
+export async function readTextLimited(res: Response, maxBytes: number): Promise<string | null> {
+  const body = res.body;
+  // No stream available (some mocks, and 204s): fall back to a size-checked read.
+  if (!body) {
+    const text = await res.text();
+    return Buffer.byteLength(text) > maxBytes ? null : text;
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      // eslint-disable-next-line no-await-in-loop
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        total += value.byteLength;
+        if (total > maxBytes) {
+          await reader.cancel().catch(() => {});
+          return null;
+        }
+        chunks.push(value);
+      }
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
 /** Strips markup to readable text. Script/style bodies go first so their contents don't leak in. */
 export function htmlToText(html: string): string {
   return html
@@ -198,7 +238,10 @@ export async function runUnitLookup(args: { code?: string } = {}): Promise<strin
       return `Error: the handbook page for ${code} was unexpectedly large. Tell the user to check ${url} directly.`;
     }
 
-    const html = (await res.text()).slice(0, MAX_RESPONSE_BYTES);
+    const html = await readTextLimited(res, MAX_RESPONSE_BYTES);
+    if (html === null) {
+      return `Error: the handbook page for ${code} was unexpectedly large. Tell the user to check ${url} directly.`;
+    }
     const details = parseUnitPage(html, code);
 
     // A redirect to a search/landing page yields neither title nor fields.

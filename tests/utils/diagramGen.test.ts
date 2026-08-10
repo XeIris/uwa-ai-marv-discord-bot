@@ -148,6 +148,24 @@ describe('sanitizeSvg', () => {
     expect(sanitizeSvg(src, 900).ok).toBe(true);
   });
 
+  test('allows a same-document ref preceded by another token', () => {
+    // A single anchored match rejected this, because of the "l" in "blue".
+    const src = '<svg width="400" height="200"><rect width="9" height="9" fill="blue url(#a)"/></svg>';
+    expect(sanitizeSvg(src, 900).ok).toBe(true);
+  });
+
+  test('rejects a value whose SECOND url() is external', () => {
+    // Validating only the first url() let this through — every occurrence counts.
+    const src = '<svg width="400" height="200">'
+      + '<rect width="9" height="9" stroke="url(#a) url(http://evil.example/#b)"/></svg>';
+    expect(sanitizeSvg(src, 900).ok).toBe(false);
+  });
+
+  test('rejects an external ref that appears after a "u" earlier in the value', () => {
+    const src = '<svg width="400" height="200"><rect width="9" height="9" fill="blue url(http://evil/#g)"/></svg>';
+    expect(sanitizeSvg(src, 900).ok).toBe(false);
+  });
+
   test.each([
     ['script element', '<svg width="400" height="200"><script>alert(1)</script></svg>'],
     ['style element', '<svg width="400" height="200"><style>@import url(http://evil)</style></svg>'],

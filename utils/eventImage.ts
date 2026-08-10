@@ -76,11 +76,18 @@ export async function resolveEventImageUrl(
   }
 }
 
-/** Resolves an image URL and drops the stored reference if the source is gone. */
+/**
+ * Resolves an image URL and drops the stored reference if the source is gone.
+ *
+ * The prune is conditional on the reference still being the one that failed —
+ * an organiser can run `/event setimage` between the resolve and the prune, and
+ * an unconditional clear would delete that brand-new reference.
+ */
 export async function resolveAndPrune(client: any, db: any, event: EventEntry): Promise<string | null> {
+  const ref = imageRefFor(event);
   const { url, missing } = await resolveEventImageUrl(client, event);
-  if (missing) {
-    await db.event.clearImage(event.serverId, event.id).catch((err: any) => {
+  if (missing && ref) {
+    await db.event.clearImageIfMatches(event.serverId, event.id, ref).catch((err: any) => {
       logError(`[eventimage] failed to clear dead image ref for event ${event.id}:`, err);
     });
   }

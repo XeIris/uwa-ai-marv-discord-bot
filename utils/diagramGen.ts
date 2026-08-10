@@ -624,12 +624,17 @@ export function sanitizeSvg(src: string, fallbackWidth: number): SvgSanitizeResu
       if (lowerValue.includes(SCRIPT_SCHEME) || lowerValue.includes('data:') || lowerValue.includes('@import')) {
         return { ok: false, error: `Error: value of "${attrName}" contains a forbidden scheme or directive.` };
       }
-      // Paint refs may only point inside this document.
-      if (lowerValue.includes('url(') && !/^[^u]*url\(\s*['"]?#/.test(lowerValue)) {
+      // Paint refs may only point inside this document. EVERY occurrence has to
+      // be checked, not just the first: an anchored single-match test accepts
+      // `url(#a) url(http://evil/#b)` (the external ref never gets looked at)
+      // and wrongly rejects `blue url(#a)` (a token before the ref). Both are
+      // covered in the rejection matrix.
+      const urlRefs = [...lowerValue.matchAll(/url\(\s*['"]?([^)'"]*)/g)];
+      if (urlRefs.some((match) => !match[1].trim().startsWith('#'))) {
         return {
           ok: false,
-          error: `Error: "${attrName}" may only reference same-document ids, as url(#someId) — external references `
-            + 'are never allowed.',
+          error: `Error: "${attrName}" may only reference same-document ids, as url(#someId) — every url() in the `
+            + 'value must point at a "#" id, and external references are never allowed.',
         };
       }
       if (SVG_REF_ATTRS.has(attrName) && !attr.value.trim().startsWith('#')) {
@@ -787,51 +792,21 @@ export async function runDiagramGeneration(opts: {
   const width = clampDimension(args?.width, MIN_WIDTH, MAX_WIDTH, DEFAULT_WIDTH) as number;
   const height = clampDimension(args?.height, MIN_HEIGHT, MAX_HEIGHT, null);
 
-  // Parse and validate before spending a quota slot — a rejected render is the
-  // model's mistake to fix, not the user's quota to pay for.
-  let svgMarkup: string;
+  // Parse and validate before claiming the slot or spending quota — a rejected
+  // render is the model's mistake to fix, not the user's quota to pay for, and
+  // parsing is cheap.
+  let sanitizedSvg: string | null = null;
+  let htmlTree: any = null;
   if (format === 'svg') {
     const sanitized = sanitizeSvg(source, width);
     if (!sanitized.ok) return sanitized;
-    svgMarkup = sanitized.svg;
+    sanitizedSvg = sanitized.svg;
   } else {
     const parsed = parseRestrictedHtml(source);
     if (!parsed.ok) return parsed;
     const dimError = checkDimensions(width, height ?? MIN_HEIGHT);
     if (dimError) return { ok: false, error: dimError };
-
-    const fonts = await getFonts();
-    if (!fonts) {
-      return { ok: false, error: 'Error: diagram rendering is unavailable (fonts missing). Tell the user it is temporarily down.' };
-    }
-    try {
-      svgMarkup = await withTimeout(
-        satori(parsed.node as any, {
-          width,
-          ...(height === null ? {} : { height }),
-          fonts: fonts as any,
-        }),
-        RENDER_TIMEOUT_MS,
-        'layout',
-      );
-    } catch (err) {
-      logError('[diagram] satori layout failed:', err);
-      return {
-        ok: false,
-        error: `Error: the layout engine rejected this markup (${err instanceof Error ? err.message : 'unknown error'}). `
-          + `Simplify it and stay inside the subset from ${DIAGRAM_GUIDE_TOOL_NAME}.`,
-      };
-    }
-    // Auto-height means satori, not the model, chose the canvas — re-check it.
-    const produced = svgDimensions(svgMarkup);
-    const dimError2 = checkDimensions(produced.width || width, produced.height || MIN_HEIGHT);
-    if (dimError2) {
-      return {
-        ok: false,
-        error: `${dimError2} The content laid out to ${produced.width}×${produced.height}. Shorten it or set an `
-          + 'explicit height.',
-      };
-    }
+    htmlTree = parsed.node;
   }
 
   if (inFlightRenders >= MAX_CONCURRENT_RENDERS) {
@@ -839,6 +814,10 @@ export async function runDiagramGeneration(opts: {
   }
   // Claim the slot synchronously — no await between the guard and this line, so
   // concurrent tool calls cannot all pass the check before it takes effect.
+  // Everything CPU-heavy has to happen after this point: satori layout is the
+  // expensive step for html sources, so laying out before the claim would leave
+  // the "one render at a time" guarantee unenforced for exactly the path that
+  // needs it.
   inFlightRenders += 1;
 
   const title = sanitizeTitle(args?.title);
@@ -868,6 +847,43 @@ export async function runDiagramGeneration(opts: {
     if (!fonts) {
       await releaseQuota();
       return { ok: false, error: 'Error: diagram rendering is unavailable (fonts missing).' };
+    }
+
+    // Layout (html only) runs here, inside the slot — see the claim comment above.
+    let svgMarkup: string;
+    if (sanitizedSvg !== null) {
+      svgMarkup = sanitizedSvg;
+    } else {
+      try {
+        svgMarkup = await withTimeout(
+          satori(htmlTree, {
+            width,
+            ...(height === null ? {} : { height }),
+            fonts: fonts as any,
+          }),
+          RENDER_TIMEOUT_MS,
+          'layout',
+        );
+      } catch (err) {
+        logError('[diagram] satori layout failed:', err);
+        await releaseQuota();
+        return {
+          ok: false,
+          error: `Error: the layout engine rejected this markup (${err instanceof Error ? err.message : 'unknown error'}). `
+            + `Simplify it and stay inside the subset from ${DIAGRAM_GUIDE_TOOL_NAME}.`,
+        };
+      }
+      // Auto-height means satori, not the model, chose the canvas — re-check it.
+      const laidOut = svgDimensions(svgMarkup);
+      const dimError = checkDimensions(laidOut.width || width, laidOut.height || MIN_HEIGHT);
+      if (dimError) {
+        await releaseQuota();
+        return {
+          ok: false,
+          error: `${dimError} The content laid out to ${laidOut.width}×${laidOut.height}. Shorten it or set an `
+            + 'explicit height.',
+        };
+      }
     }
 
     let png: Buffer;

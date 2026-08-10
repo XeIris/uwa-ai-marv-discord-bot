@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  readTextLimited,
   normalizeUnitCode,
   handbookUrl,
   htmlToText,
@@ -46,6 +47,39 @@ describe('runUnitLookup input validation', () => {
 
   test('refuses a missing code', async () => {
     expect(await runUnitLookup({})).toMatch(/^Error:/);
+  });
+});
+
+describe('readTextLimited', () => {
+  /** A chunked body with no Content-Length — the case the header check can't catch. */
+  const streamed = (chunks: string[]): Response => new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+        controller.close();
+      },
+    }),
+  );
+
+  test('returns the body when it is under the cap', async () => {
+    expect(await readTextLimited(streamed(['abc', 'def']), 100)).toBe('abcdef');
+  });
+
+  test('aborts an oversized chunked body that declares no Content-Length', async () => {
+    const big = 'x'.repeat(5_000);
+    expect(await readTextLimited(streamed([big, big, big]), 8_000)).toBeNull();
+  });
+
+  test('counts bytes, not characters', async () => {
+    // 4 multi-byte chars = 12 bytes, over a 10-byte cap despite being 4 chars.
+    expect(await readTextLimited(streamed(['€€€€']), 10)).toBeNull();
+  });
+
+  test('falls back to a size-checked read when there is no stream', async () => {
+    const res = { body: null, text: async () => 'short' } as any;
+    expect(await readTextLimited(res, 100)).toBe('short');
+    const big = { body: null, text: async () => 'y'.repeat(50) } as any;
+    expect(await readTextLimited(big, 10)).toBeNull();
   });
 });
 

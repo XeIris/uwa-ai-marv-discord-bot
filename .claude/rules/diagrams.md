@@ -33,7 +33,10 @@ hostile string and pass the remainder through. What that buys, and what breaks i
 - **No remote or local resource loading, at all.** No `<img>`/`<image>`, no `<style>`, no
   `@import`, and `url(...)` in CSS is refused outright; in SVG only `url(#localId)` and
   `href="#localId"` pass. Allowing any of these turns a diagram request into an SSRF probe of
-  the Docker network (or a `file://` read).
+  the Docker network (or a `file://` read). **Every `url(` in an attribute value is checked, not
+  just the first** — an anchored single-match test accepted `url(#a) url(http://evil/#b)`, since the
+  external ref was never looked at. Both that and the false rejection of `blue url(#a)` are in the
+  rejection matrix; keep them there.
 - **No code paths.** No `<script>`, no `on*` attributes, no `<foreignObject>`.
 - **No `<!…>` or `<?…?>`** — that is what keeps entity-expansion bombs out, since the tokenizer
   refuses DOCTYPE/ENTITY/CDATA before any parser sees them.
@@ -52,8 +55,11 @@ which is then **re-checked** against the caps because satori, not the model, cho
 1` claimed synchronously; 20 renders/user/24 h via `DiagramGenLog` (`db.diagramGen`), reserved
 atomically and released on failure exactly like `MusicGenLog`.
 
-Parse/validate happens **before** the quota slot is claimed — a render the model got wrong is
-its mistake to retry, not the user's quota to pay for. The 20 000-char `source` is truncated to
+Ordering inside `runDiagramGeneration` is load-bearing: parse/validate → **claim the slot** →
+reserve quota → satori layout → rasterise. Parsing before the claim means a render the model got
+wrong costs no slot and no quota. Layout after it matters just as much — satori is the CPU-heavy
+step for html sources, so laying out before the claim would leave "one render at a time"
+unenforced for exactly the path that needs it. The 20 000-char `source` is truncated to
 500 chars by `redactToolCallArgs` before it lands in chat history.
 
 ## Fonts

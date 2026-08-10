@@ -25,10 +25,11 @@ tools). Verification needs proof of enrolment — a UWA email or student ID.
 Two changes worth knowing, because both bit people recently:
 
 - **GitHub Copilot.** From 12 March 2026 verified students moved to a Copilot Student plan with
-  200 monthly AI credits and unlimited code completions. **New sign-ups for the free student plan
-  were paused in April 2026**, citing compute demand — students verified before the pause kept
-  theirs; new pack members get Copilot Free until sign-ups reopen. Tell people to check current
-  status rather than promising them free Copilot.
+  200 monthly AI credits and unlimited code completions. Sign-ups were paused in April 2026 on
+  compute demand, then **reopened from 17 June 2026**, rolled out gradually to new subscribers. So
+  free Copilot Student is generally available to verified students again — but the rollout was
+  staged and eligibility terms aren't restated in the announcement, so tell people to check their
+  own account rather than promising it.
 - **DigitalOcean has left the pack.** Its student credit ended and all GitHub Student Pack
   promotional credits there **expired 31 July 2026**. Do not offer this one.
 

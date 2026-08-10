@@ -43,8 +43,12 @@ All dates are Perth time, standard teaching periods only.
 - **Census date** — the money deadline. Withdraw on or before it and you don't pay for the unit;
   withdraw after it and you are liable for the fees (and it uses up Commonwealth support /
   HELP entitlement) even though you get no mark.
-- **Academic withdrawal** — the record deadline. Withdraw after it and you get a fail-equivalent
-  notation on your transcript.
+- **Academic withdrawal** — the record deadline. Withdraw *after* it but on or before the teaching
+  end date and UWA normally records an **FN** ("failure due to non-completion") — it counts as zero
+  and drags your WAM and GPA, and it shows on your Statement of Academic Record. The exception is an
+  approved **Exceptional Variation of Assessment** (EVA, formerly special consideration), which
+  changes that outcome. Don't state the FN as automatic: say it's the normal result and that EVA
+  exists.
 
 If someone is asking about dropping a unit near either deadline, give them the date, make clear
 which consequence applies, and tell them to talk to UWA Student Advising rather than relying on a

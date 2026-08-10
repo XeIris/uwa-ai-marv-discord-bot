@@ -116,27 +116,54 @@ class EventModel {
     return result.changes > 0;
   }
 
-  /** Forgets an event's image reference (used when the source message is gone). */
+  /** Forgets an event's image reference outright (explicit removal by an admin). */
   async clearImage(serverId: string, id: number): Promise<boolean> {
     const result = await this.db.executeQuery(eventQueries.CLEAR_IMAGE, [id, serverId]);
     return result.changes > 0;
   }
 
   /**
-   * Events starting inside `windowMs` from now whose `kind` reminder hasn't been
-   * sent. Deliberately **not** scoped to one guild: the scheduler sweeps every
-   * server in one pass and routes by each row's serverId.
+   * Forgets an image reference only if it's still the one given. Used when a
+   * resolution found the source message gone: an organiser may have replaced the
+   * image in the meantime, and that newer reference must not be wiped.
+   */
+  async clearImageIfMatches(
+    serverId: string,
+    id: number,
+    ref: { channelId: string; messageId: string; attachmentId: string },
+  ): Promise<boolean> {
+    const result = await this.db.executeQuery(
+      eventQueries.CLEAR_IMAGE_IF_MATCHES,
+      [id, serverId, ref.channelId, ref.messageId, ref.attachmentId],
+    );
+    return result.changes > 0;
+  }
+
+  /**
+   * Events whose start falls in this reminder's **lead-time band** — more than
+   * `fromMs` and at most `toMs` from now — and whose `kind` reminder hasn't been
+   * sent. Only guilds that set `reminderConfigKey` are considered.
+   *
+   * The band matters: selecting everything before `now + toMs` meant the 24-hour
+   * sweep announced "tomorrow" for an event two hours away. The band is far wider
+   * than the tick interval, so a delayed or skipped tick still catches it.
+   *
+   * Deliberately **not** scoped to one guild: the scheduler sweeps every server
+   * in one pass and routes by each row's serverId.
    */
   async listDueReminders(
     kind: ReminderKind,
-    windowMs: number,
+    fromMs: number,
+    toMs: number,
+    reminderConfigKey: string,
     limit = 50,
     now: Date = new Date(),
   ): Promise<EventEntry[]> {
-    const until = new Date(now.getTime() + windowMs);
+    const after = new Date(now.getTime() + fromMs);
+    const until = new Date(now.getTime() + toMs);
     return this.db.executeSelectAllQuery(
       eventQueries.LIST_DUE_REMINDERS(REMINDER_COLUMNS[kind]),
-      [now.toISOString(), until.toISOString(), limit],
+      [after.toISOString(), until.toISOString(), reminderConfigKey, limit],
     ) as Promise<EventEntry[]>;
   }
 
@@ -149,6 +176,19 @@ class EventModel {
     const result = await this.db.executeQuery(
       eventQueries.MARK_REMINDER_SENT(REMINDER_COLUMNS[kind]),
       [now.toISOString(), id],
+    );
+    return result.changes > 0;
+  }
+
+  /**
+   * Hands a claim back after delivery failed to every channel, so a later tick
+   * retries. `claimedAt` must be the value {@link claimReminder} wrote, so a
+   * claim taken by a different tick in the meantime is never cleared.
+   */
+  async releaseReminder(kind: ReminderKind, id: number, claimedAt: string): Promise<boolean> {
+    const result = await this.db.executeQuery(
+      eventQueries.RELEASE_REMINDER(REMINDER_COLUMNS[kind]),
+      [id, claimedAt],
     );
     return result.changes > 0;
   }
