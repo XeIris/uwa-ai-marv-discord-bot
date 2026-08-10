@@ -7,7 +7,6 @@ import Database from '../database/Database';
 import { log, logError } from '../utils/log';
 // Note: Bun automatically reads .env files
 import keywordsJson from '../data/keywords.json';
-import statusJson from '../data/status.json';
 import scriptHandlers from './handlers/keywordsBehaviorHandler';
 import { EventScheduler } from './eventScheduler';
 import { loadAllowedServers } from '../utils/accessControl';
@@ -34,7 +33,6 @@ class Silverwolf extends Client {
   deletedMessages: any[];
   editedMessages: any[];
   db: any;
-  games: string[];
 
   constructor(token: string, options: ClientOptions) {
     super(options);
@@ -46,8 +44,6 @@ class Silverwolf extends Client {
     this.db = new Database('./persistence/database.db');
     this.eventScheduler = new EventScheduler(this);
     this.init();
-    this.games = [];
-    this.loadGames(); // Initialize the games list from the JSON file
   }
 
   async init(): Promise<void> {
@@ -382,45 +378,9 @@ All wrongs reserved.
     log('=======================================================');
   }
 
-  setRandomGame(): void {
-    if (!this.games || this.games.length === 0) return;
-    const randomGame = this.games[Math.floor(Math.random() * this.games.length)];
-    this.user!.setPresence({
-      activities: [{
-        name: randomGame,
-        type: 0, // 0 is for playing, 1 is for streaming, 2 is for listening, etc.
-      }],
-      status: 'online', // Modify this if you want different statuses like 'idle', 'dnd', etc.
-    });
-
-    // Log the game change and schedule the next one
-    let randomInterval: number;
-    if (randomGame === 'on bed with Ei') {
-      randomInterval = (Math.floor(Math.random() * 3) + 1) * 60 * 1000; // Random interval between 1 and 3 minutes
-    } else {
-      randomInterval = (Math.floor(Math.random() * 3) + 1) * 60 * 60 * 1000; // Random interval between 1 and 3 hours
-    }
-    log(`Setting status to "${randomGame}". Next change in ${randomInterval / 1000 / 60} minutes.`);
-
-    setTimeout(() => this.setRandomGame(), randomInterval); // Schedule the next game change
-  }
-
-  loadGames(): void {
-    try {
-      const games = (statusJson as any).games;
-      if (games && Array.isArray(games) && games.length > 0) {
-        this.games = games.filter((g: unknown) => typeof g === 'string' && g.trim().length > 0);
-      }
-      log(`Games loaded from status.json: ${this.games}`);
-    } catch (error) {
-      logError('Error loading games from status.json:', error);
-    }
-  }
-
   async login(): Promise<string> {
     await super.login(this.token);
     log(`Logged in as ${this.user!.tag}`);
-    this.setRandomGame(); // Start cycling through games after logging in
     // Started only after login: the sweep fetches channels, which needs a ready
     // client. It no-ops for any guild without event_reminder_channels set.
     this.eventScheduler.start();
