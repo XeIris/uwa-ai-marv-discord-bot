@@ -37,6 +37,32 @@ function assertReminderKind(kind: ReminderKind): ReminderKind {
   return kind;
 }
 
+/**
+ * Rejects an event id that isn't a positive integer. Callers are typed and ids
+ * come from an AUTOINCREMENT column, but these are public DAO methods and `?`
+ * placeholders only stop injection — they don't enforce the invariant.
+ */
+function assertEventId(id: number): number {
+  if (!Number.isInteger(id) || id <= 0) throw new Error(`Invalid event id: ${String(id)}`);
+  return id;
+}
+
+/**
+ * Rejects a Discord identifier that isn't a snowflake. Applied to the stored
+ * image reference (channel/message/attachment), whose values always come from
+ * the Discord API.
+ *
+ * Deliberately NOT applied to `serverId`: it flows from `interaction.guild.id`
+ * everywhere, and tightening it would buy nothing while breaking fixtures that
+ * legitimately use short ids.
+ */
+function assertSnowflake(value: string, label: string): string {
+  if (typeof value !== 'string' || !/^\d{17,20}$/.test(value)) {
+    throw new Error(`Invalid ${label}: expected a Discord snowflake, got ${String(value)}`);
+  }
+  return value;
+}
+
 /** Coerces a millisecond offset to a finite non-negative integer. */
 function toOffsetMs(value: number, label: string): number {
   if (!Number.isFinite(value) || value < 0) throw new Error(`${label} must be a non-negative finite number`);
@@ -122,14 +148,20 @@ class EventModel {
   ): Promise<boolean> {
     const result = await this.db.executeQuery(
       eventQueries.SET_IMAGE,
-      [ref.channelId, ref.messageId, ref.attachmentId, id, serverId],
+      [
+        assertSnowflake(ref.channelId, 'image channel id'),
+        assertSnowflake(ref.messageId, 'image message id'),
+        assertSnowflake(ref.attachmentId, 'image attachment id'),
+        assertEventId(id),
+        serverId,
+      ],
     );
     return result.changes > 0;
   }
 
   /** Forgets an event's image reference outright (explicit removal by an admin). */
   async clearImage(serverId: string, id: number): Promise<boolean> {
-    const result = await this.db.executeQuery(eventQueries.CLEAR_IMAGE, [id, serverId]);
+    const result = await this.db.executeQuery(eventQueries.CLEAR_IMAGE, [assertEventId(id), serverId]);
     return result.changes > 0;
   }
 
@@ -145,7 +177,13 @@ class EventModel {
   ): Promise<boolean> {
     const result = await this.db.executeQuery(
       eventQueries.CLEAR_IMAGE_IF_MATCHES,
-      [id, serverId, ref.channelId, ref.messageId, ref.attachmentId],
+      [
+        assertEventId(id),
+        serverId,
+        assertSnowflake(ref.channelId, 'image channel id'),
+        assertSnowflake(ref.messageId, 'image message id'),
+        assertSnowflake(ref.attachmentId, 'image attachment id'),
+      ],
     );
     return result.changes > 0;
   }
@@ -194,7 +232,7 @@ class EventModel {
     if (!Number.isFinite(now.getTime())) throw new Error('now must be a valid Date');
     const result = await this.db.executeQuery(
       eventQueries.MARK_REMINDER_SENT[safeKind],
-      [now.toISOString(), id],
+      [now.toISOString(), assertEventId(id)],
     );
     return result.changes > 0;
   }
@@ -206,9 +244,12 @@ class EventModel {
    */
   async releaseReminder(kind: ReminderKind, id: number, claimedAt: string): Promise<boolean> {
     const safeKind = assertReminderKind(kind);
+    if (typeof claimedAt !== 'string' || claimedAt.trim() === '') {
+      throw new Error('claimedAt must be the non-empty timestamp written by claimReminder');
+    }
     const result = await this.db.executeQuery(
       eventQueries.RELEASE_REMINDER[safeKind],
-      [id, claimedAt],
+      [assertEventId(id), claimedAt],
     );
     return result.changes > 0;
   }

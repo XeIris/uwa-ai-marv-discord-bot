@@ -86,4 +86,45 @@ describe('EventModel', () => {
     expect(await db.event.delete(SERVER, id!)).toBe(true);
     expect(await db.event.getById(SERVER, id!)).toBeNull();
   });
+
+  describe('DAO input validation', () => {
+    const CH = '100000000000000001';
+    const MSG = '100000000000000002';
+    const ATT = '100000000000000003';
+
+    test('accepts a real event id and snowflake image reference', async () => {
+      const id = await db.event.create(SERVER, { name: 'Workshop', startsAt: iso(24) });
+      expect(await db.event.setImage(SERVER, id!, { channelId: CH, messageId: MSG, attachmentId: ATT })).toBe(true);
+      const stored = await db.event.getById(SERVER, id!);
+      expect(stored?.imageMessageId).toBe(MSG);
+    });
+
+    test.each([
+      ['zero', 0],
+      ['negative', -1],
+      ['fractional', 1.5],
+      ['NaN', Number.NaN],
+    ])('rejects a %s event id before touching SQL', async (_label, id) => {
+      expect(db.event.clearImage(SERVER, id as number)).rejects.toThrow(/Invalid event id/);
+      expect(db.event.claimReminder('soon', id as number)).rejects.toThrow(/Invalid event id/);
+    });
+
+    test('rejects a non-snowflake image identifier', async () => {
+      const id = await db.event.create(SERVER, { name: 'Workshop', startsAt: iso(24) });
+      expect(db.event.setImage(SERVER, id!, { channelId: 'c1', messageId: MSG, attachmentId: ATT }))
+        .rejects.toThrow(/image channel id/);
+      expect(db.event.setImage(SERVER, id!, { channelId: CH, messageId: 'm1', attachmentId: ATT }))
+        .rejects.toThrow(/image message id/);
+    });
+
+    test('rejects an unknown reminder kind and an inverted band', async () => {
+      expect(db.event.listDueReminders('bogus' as any, 0, 3600_000, 'k')).rejects.toThrow(/Unknown reminder kind/);
+      expect(db.event.listDueReminders('soon', 3600_000, 0, 'k')).rejects.toThrow(/greater than fromMs/);
+    });
+
+    test('rejects an empty claimedAt on release', async () => {
+      const id = await db.event.create(SERVER, { name: 'Workshop', startsAt: iso(24) });
+      expect(db.event.releaseReminder('soon', id!, '')).rejects.toThrow(/non-empty timestamp/);
+    });
+  });
 });
