@@ -20,17 +20,28 @@ export interface EventEntry {
   reminderSoonSentAt: string | null;
 }
 
-/**
- * The two reminder marker columns. SQLite cannot parameterise an identifier, so
- * the column name is interpolated into the SQL — it must therefore only ever
- * come from this constant, never from a caller.
- */
-export const REMINDER_COLUMNS = {
-  day: 'reminder_day_sent_at',
-  soon: 'reminder_soon_sent_at',
-} as const;
+/** The two reminder lead times. Each has its own static SQL in eventQueries. */
+export const REMINDER_KINDS = ['day', 'soon'] as const;
 
-export type ReminderKind = keyof typeof REMINDER_COLUMNS;
+export type ReminderKind = typeof REMINDER_KINDS[number];
+
+/**
+ * Whitelists the reminder kind at the DAO boundary. Callers are typed, but a
+ * bad value would otherwise select `undefined` from the query map and hand
+ * `undefined` to `db.query()` — fail loudly here instead.
+ */
+function assertReminderKind(kind: ReminderKind): ReminderKind {
+  if (!(REMINDER_KINDS as readonly string[]).includes(kind)) {
+    throw new Error(`Unknown reminder kind: ${String(kind)}`);
+  }
+  return kind;
+}
+
+/** Coerces a millisecond offset to a finite non-negative integer. */
+function toOffsetMs(value: number, label: string): number {
+  if (!Number.isFinite(value) || value < 0) throw new Error(`${label} must be a non-negative finite number`);
+  return Math.trunc(value);
+}
 
 export interface EventInput {
   name?: string;
@@ -159,11 +170,17 @@ class EventModel {
     limit = 50,
     now: Date = new Date(),
   ): Promise<EventEntry[]> {
-    const after = new Date(now.getTime() + fromMs);
-    const until = new Date(now.getTime() + toMs);
+    const safeKind = assertReminderKind(kind);
+    const from = toOffsetMs(fromMs, 'fromMs');
+    const to = toOffsetMs(toMs, 'toMs');
+    if (to <= from) throw new Error('toMs must be greater than fromMs');
+    const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 200) : 50;
+    const base = now.getTime();
+    if (!Number.isFinite(base)) throw new Error('now must be a valid Date');
+
     return this.db.executeSelectAllQuery(
-      eventQueries.LIST_DUE_REMINDERS(REMINDER_COLUMNS[kind]),
-      [after.toISOString(), until.toISOString(), reminderConfigKey, limit],
+      eventQueries.LIST_DUE_REMINDERS[safeKind],
+      [new Date(base + from).toISOString(), new Date(base + to).toISOString(), reminderConfigKey, safeLimit],
     ) as Promise<EventEntry[]>;
   }
 
@@ -173,8 +190,10 @@ class EventModel {
    * slow post can never be duplicated.
    */
   async claimReminder(kind: ReminderKind, id: number, now: Date = new Date()): Promise<boolean> {
+    const safeKind = assertReminderKind(kind);
+    if (!Number.isFinite(now.getTime())) throw new Error('now must be a valid Date');
     const result = await this.db.executeQuery(
-      eventQueries.MARK_REMINDER_SENT(REMINDER_COLUMNS[kind]),
+      eventQueries.MARK_REMINDER_SENT[safeKind],
       [now.toISOString(), id],
     );
     return result.changes > 0;
@@ -186,8 +205,9 @@ class EventModel {
    * claim taken by a different tick in the meantime is never cleared.
    */
   async releaseReminder(kind: ReminderKind, id: number, claimedAt: string): Promise<boolean> {
+    const safeKind = assertReminderKind(kind);
     const result = await this.db.executeQuery(
-      eventQueries.RELEASE_REMINDER(REMINDER_COLUMNS[kind]),
+      eventQueries.RELEASE_REMINDER[safeKind],
       [id, claimedAt],
     );
     return result.changes > 0;

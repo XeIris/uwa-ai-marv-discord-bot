@@ -5,7 +5,7 @@ import { EventScheduler } from '../../classes/eventScheduler';
 import type { EventEntry, ReminderKind } from '../../database/models/EventModel';
 
 const NOW = new Date('2026-09-01T00:00:00.000Z');
-/** Real Discord channel ids are 17-20 digit snowflakes — parseChannelIds validates that. */
+/** Real Discord channel ids are 17-20 digit snowflakes — parseSnowflakeIds validates that. */
 const CH_A = '100000000000000001';
 const CH_B = '100000000000000002';
 
@@ -136,6 +136,16 @@ describe('EventScheduler', () => {
     expect(hh.sent).toEqual([]);
     // Critically: no claim, so configuring a channel later still gets a reminder.
     expect(hh.claims).toEqual([]);
+  });
+
+  test('a malformed config consumes the marker, so it cannot starve healthy guilds', async () => {
+    // Non-empty value that yields no usable snowflake: it passes the SQL filter,
+    // so if the marker were left NULL the row would return in every batch.
+    const hh = harness({ events: { soon: [makeEvent()] }, reminderChannels: 'not-a-snowflake' });
+    await new EventScheduler(hh.client).tick(NOW);
+    expect(hh.sent).toEqual([]);
+    expect(hh.claims).toEqual([{ kind: 'soon', id: 1 }]);
+    expect(hh.releases).toEqual([]);
   });
 
   test('passes a lead-time band and the opt-in config key to the query', async () => {

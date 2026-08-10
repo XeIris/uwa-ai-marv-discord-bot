@@ -149,15 +149,23 @@ export class EventScheduler {
     }
 
     if (channelIds.length === 0) {
-      // The SQL already excludes guilds with no configured channel, so reaching
-      // here means the stored value held nothing usable (e.g. only invalid ids).
+      // The SQL excludes guilds with an empty setting, so reaching here means the
+      // stored value was non-empty but held no usable snowflake — a malformed
+      // config, not an opted-out guild.
+      //
+      // Consume the marker anyway. Leaving it NULL looks kinder (a fixed config
+      // would then be picked up) but it puts the row back in every subsequent
+      // batch, and a LIMITed batch of malformed rows starves guilds whose config
+      // is fine. Losing one reminder for a guild whose setting is broken is the
+      // better failure.
       if (!this.warnedGuilds.has(event.serverId)) {
         this.warnedGuilds.add(event.serverId);
-        log(`[events] guild ${event.serverId} has an event_reminder_channels value that resolved to no usable `
-          + 'channel ids — reminders are off for it (re-set with /serverconfig setchannel)');
+        logError(`[events] guild ${event.serverId} has an event_reminder_channels value that contains no usable `
+          + 'channel id — skipping its reminders (re-set it with /serverconfig setchannel)');
       }
-      // Leave the marker NULL: if they fix the config before the event, the next
-      // tick picks it up.
+      await this.client.db.event.claimReminder(kind, event.id, now).catch((err: any) => {
+        logError(`[events] failed to skip ${kind} reminder for event ${event.id}:`, err);
+      });
       return;
     }
 

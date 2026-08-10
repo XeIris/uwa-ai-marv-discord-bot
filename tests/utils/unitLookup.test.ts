@@ -51,28 +51,47 @@ describe('runUnitLookup input validation', () => {
 });
 
 describe('readTextLimited', () => {
-  /** A chunked body with no Content-Length — the case the header check can't catch. */
-  const streamed = (chunks: string[]): Response => new Response(
-    new ReadableStream({
-      start(controller) {
-        for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
-        controller.close();
+  /**
+   * A **pull-based** chunked body with no Content-Length — the case the header
+   * check can't catch. Pull-based on purpose: a fixture that enqueues everything
+   * in `start()` is already closed by the time the cap is hit, so the test would
+   * still pass with the `cancel()` removed. This one records how many chunks were
+   * actually pulled and whether the reader cancelled.
+   */
+  const streamed = (chunks: string[]) => {
+    const state = { pulled: 0, cancelled: false };
+    const res = new Response(new ReadableStream({
+      pull(controller) {
+        if (state.pulled >= chunks.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(new TextEncoder().encode(chunks[state.pulled]));
+        state.pulled += 1;
       },
-    }),
-  );
+      cancel() { state.cancelled = true; },
+    }));
+    return { res, state };
+  };
 
   test('returns the body when it is under the cap', async () => {
-    expect(await readTextLimited(streamed(['abc', 'def']), 100)).toBe('abcdef');
+    const { res } = streamed(['abc', 'def']);
+    expect(await readTextLimited(res, 100)).toBe('abcdef');
   });
 
-  test('aborts an oversized chunked body that declares no Content-Length', async () => {
+  test('cancels an oversized chunked body instead of reading it all', async () => {
     const big = 'x'.repeat(5_000);
-    expect(await readTextLimited(streamed([big, big, big]), 8_000)).toBeNull();
+    const { res, state } = streamed([big, big, big, big, big, big, big, big]);
+    expect(await readTextLimited(res, 8_000)).toBeNull();
+    // Cancelled, and stopped pulling well before the end of the body.
+    expect(state.cancelled).toBe(true);
+    expect(state.pulled).toBeLessThan(8);
   });
 
   test('counts bytes, not characters', async () => {
     // 4 multi-byte chars = 12 bytes, over a 10-byte cap despite being 4 chars.
-    expect(await readTextLimited(streamed(['€€€€']), 10)).toBeNull();
+    const { res } = streamed(['€€€€']);
+    expect(await readTextLimited(res, 10)).toBeNull();
   });
 
   test('falls back to a size-checked read when there is no stream', async () => {

@@ -55,11 +55,15 @@ which is then **re-checked** against the caps because satori, not the model, cho
 1` claimed synchronously; 20 renders/user/24 h via `DiagramGenLog` (`db.diagramGen`), reserved
 atomically and released on failure exactly like `MusicGenLog`.
 
-Ordering inside `runDiagramGeneration` is load-bearing: parse/validate → **claim the slot** →
-reserve quota → satori layout → rasterise. Parsing before the claim means a render the model got
-wrong costs no slot and no quota. Layout after it matters just as much — satori is the CPU-heavy
-step for html sources, so laying out before the claim would leave "one render at a time"
-unenforced for exactly the path that needs it. The 20 000-char `source` is truncated to
+Ordering inside `runDiagramGeneration` is load-bearing, and differs by format because only the
+html path has a layout step:
+
+- **html:** parse/validate → **claim the slot** → reserve quota → satori layout → rasterise.
+- **svg:** sanitize/validate → **claim the slot** → reserve quota → rasterise.
+
+Parsing before the claim means a render the model got wrong costs no slot and no quota. Layout
+after it matters just as much — satori is the CPU-heavy step for html sources, so laying out before
+the claim would leave "one render at a time" unenforced for exactly the path that needs it. The 20 000-char `source` is truncated to
 500 chars by `redactToolCallArgs` before it lands in chat history.
 
 ## Fonts
