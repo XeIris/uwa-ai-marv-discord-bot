@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "fetch:soundfont": "bun scripts/fetch-soundfont.ts",
     "fetch:constitution": "bun scripts/fetch-constitution.ts",
+    "fetch:fonts": "bun scripts/fetch-fonts.ts",
     "seed:committee": "bun scripts/seed-committee.ts"
   },
   "keywords": [],
@@ -21,9 +22,11 @@
   "dependencies": {
     "@google/generative-ai": "^0.16.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@resvg/resvg-wasm": "^2.6.2",
     "discord.js": "^14.26.0",
     "mime": "^2.5.2",
     "openai": "^5.12.2",
+    "satori": "^0.29.0",
     "spessasynth_core": "^4.3.12",
     "unpdf": "^1.6.2"
   },
