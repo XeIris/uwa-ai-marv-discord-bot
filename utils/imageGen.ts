@@ -12,6 +12,7 @@ export const IMAGE_GEN_FALLBACK_MODEL = 'google/gemini-3.1-flash-lite-image';
 /** Marv's own avatar, used as a character reference when he draws himself. */
 const SELF_PORTRAIT_PATH = `${import.meta.dir}/../data/marv-pfp.png`;
 const SELF_PORTRAIT_MIME = 'image/png';
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 const IMAGE_GEN_TIMEOUT_MS = 60_000;
 const MAX_PROMPT_CHARS = 2_000;
@@ -147,6 +148,12 @@ async function getSelfPortraitPart(): Promise<any | null> {
   try {
     const buf = await Bun.file(SELF_PORTRAIT_PATH).arrayBuffer();
     if (buf.byteLength === 0) throw new Error('portrait file is empty');
+    // The data URL hard-codes image/png, so check the file really is one — a
+    // truncated checkout or a swapped file should fail here (before quota is
+    // reserved) rather than as a provider error the user pays for.
+    if (!Buffer.from(buf.slice(0, PNG_SIGNATURE.length)).equals(PNG_SIGNATURE)) {
+      throw new Error('portrait file is not a PNG');
+    }
     const b64 = Buffer.from(buf).toString('base64');
     cachedSelfPortraitPart = {
       type: 'image_url',
@@ -308,8 +315,10 @@ export async function runImageGeneration(opts: {
   return {
     ok: true,
     attachment: { attachment: buffer, name: `imgen-${Date.now()}.${ext}` },
-    // eslint-disable-next-line no-nested-ternary
-    resultText: `Image ${useAttached ? 'edited' : (selfPortraitPart ? 'of you generated' : 'generated')} successfully from prompt "${prompt.slice(0, 200)}". `
+    // "of you" survives a combined call — a self-portrait built on the user's
+    // attached image is still a picture of Marv, and the model shouldn't
+    // describe it as a plain edit.
+    resultText: `Image ${selfPortraitPart ? 'of you ' : ''}${useAttached ? 'edited' : 'generated'} successfully from prompt "${prompt.slice(0, 200)}". `
       + 'It is attached to your reply automatically — do not write a link, markdown image, or placeholder for it; '
       + 'just describe it briefly.',
   };

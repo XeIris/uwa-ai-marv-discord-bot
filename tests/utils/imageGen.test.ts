@@ -111,9 +111,14 @@ describe('runImageGeneration self-portrait', () => {
       },
       { prompt: 'you holding this', use_self_portrait: true, use_attached_images: true },
     );
-    expect((await result).ok).toBe(true);
+    const res = await result;
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // Still a picture of Marv, not a plain edit.
+    expect(res.resultText).toContain('Image of you edited');
     const content = or.state.body.messages[0].content;
     expect(content).toHaveLength(3);
+    expect(content[0].text).toContain('Asimarv');
     expect(content[2]).toBe(attached);
   });
 });
