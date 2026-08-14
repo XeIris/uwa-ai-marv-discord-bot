@@ -68,6 +68,13 @@ Results are **trusted** — first-party DB/repo content, so they are not wrapped
 `keywordsBehaviorHandler.ts`). The sheet and unit tools below ride the same `club` gate, so all of
 Marv's extras appear and disappear together.
 
+`clubTools` also gates `generate_image`'s **`use_self_portrait`** parameter
+(`ImageGenContext.selfPortrait`, set in `keywordsBehaviorHandler.ts`): with it on,
+`data/marv-pfp.png` — Marv's own avatar — is sent to the image model as a character reference so
+"generate an image of yourself" draws the actual mascot instead of an invented one. The parameter is
+absent from the tool schema for every other persona, and both the schema and the system note say to
+set it *only* when the user asks for a picture of him.
+
 ## Constitution
 
 `data/skills/constitution.md` is **generated** by `bun run fetch:constitution` from
