@@ -9,6 +9,11 @@ export const IMAGE_GEN_DAILY_LIMIT = 5;
 export const IMAGE_EDIT_MAX_SOURCES = 1;
 export const IMAGE_GEN_FALLBACK_MODEL = 'google/gemini-3.1-flash-lite-image';
 
+/** Marv's own avatar, used as a character reference when he draws himself. */
+const SELF_PORTRAIT_PATH = `${import.meta.dir}/../data/marv-pfp.png`;
+const SELF_PORTRAIT_MIME = 'image/png';
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
 const IMAGE_GEN_TIMEOUT_MS = 60_000;
 const MAX_PROMPT_CHARS = 2_000;
 // Discord upload cap on non-boosted servers.
@@ -25,6 +30,17 @@ const USE_ATTACHED_DESCRIPTION = 'Set to true to use the image attached to the u
   + `message has EXACTLY ${IMAGE_EDIT_MAX_SOURCES} image attachment(s) — calls are rejected when the message has `
   + 'none or more than that; in the multi-image case, refuse the edit and ask the user to attach a single image.';
 
+const USE_SELF_PORTRAIT_DESCRIPTION = 'Set to true ONLY when the user asks for a picture of YOU — Marv, Asimarv, '
+  + 'the UWA AI Club mascot ("generate an image of yourself", "draw yourself at the beach", "make a picture of '
+  + 'Marv"). Your own reference portrait is then passed to the image model so the scene shows the real you '
+  + 'instead of an invented character; the prompt should describe the scene you want to appear in. Leave it '
+  + 'false/absent for every other image request — a picture of something else is not a picture of you.';
+
+/** Prefixed to the image-model prompt so the reference is read as a character sheet, not a base to edit. */
+const SELF_PORTRAIT_INSTRUCTION = 'The reference image provided is Asimarv ("Marv"), the mascot character of the '
+  + 'UWA AI Club. Draw a NEW image of this exact character — keep his design, colours, and proportions faithful '
+  + 'to the reference — in the following scene: ';
+
 export interface ImageGenContext {
   /** Discord user id of the requester (rate-limit key). */
   userId: string;
@@ -36,6 +52,12 @@ export interface ImageGenContext {
    * use_attached_images to edit them instead of generating from scratch.
    */
   imageParts?: any[];
+  /**
+   * Marv only (persona `clubTools`): offers `use_self_portrait`, which passes
+   * `data/marv-pfp.png` to the image model as a character reference so "generate
+   * an image of yourself" produces the actual mascot.
+   */
+  selfPortrait?: boolean;
 }
 
 export interface ImageGenAttachment {
@@ -52,7 +74,7 @@ export interface ImageGenToolDef {
   function: { name: string; description: string; parameters: Record<string, any> };
 }
 
-export function imageGenToolDef(): ImageGenToolDef {
+export function imageGenToolDef(ctx?: Pick<ImageGenContext, 'selfPortrait'>): ImageGenToolDef {
   return {
     type: 'function',
     function: {
@@ -69,6 +91,13 @@ export function imageGenToolDef(): ImageGenToolDef {
             type: 'boolean',
             description: USE_ATTACHED_DESCRIPTION,
           },
+          // Only advertised to the persona that has a portrait (Marv).
+          ...(ctx?.selfPortrait ? {
+            use_self_portrait: {
+              type: 'boolean',
+              description: USE_SELF_PORTRAIT_DESCRIPTION,
+            },
+          } : {}),
         },
         required: ['prompt'],
       },
@@ -76,7 +105,9 @@ export function imageGenToolDef(): ImageGenToolDef {
   };
 }
 
-export function imageGenGeminiDecl(): { name: string; description: string; parameters: any } {
+export function imageGenGeminiDecl(
+  ctx?: Pick<ImageGenContext, 'selfPortrait'>,
+): { name: string; description: string; parameters: any } {
   return {
     name: IMAGE_GEN_TOOL_NAME,
     description: TOOL_DESCRIPTION,
@@ -91,10 +122,56 @@ export function imageGenGeminiDecl(): { name: string; description: string; param
           type: 'BOOLEAN',
           description: USE_ATTACHED_DESCRIPTION,
         },
+        ...(ctx?.selfPortrait ? {
+          use_self_portrait: {
+            type: 'BOOLEAN',
+            description: USE_SELF_PORTRAIT_DESCRIPTION,
+          },
+        } : {}),
       },
       required: ['prompt'],
     },
   };
+}
+
+let cachedSelfPortraitPart: any = null;
+let selfPortraitLoadFailed = false;
+
+/**
+ * Marv's avatar as an OpenRouter image part, read once and cached (it's a small
+ * committed file that never changes at runtime). A missing file is a deployment
+ * problem, so it isn't retried on every call.
+ */
+async function getSelfPortraitPart(): Promise<any | null> {
+  if (cachedSelfPortraitPart) return cachedSelfPortraitPart;
+  if (selfPortraitLoadFailed) return null;
+  try {
+    const buf = await Bun.file(SELF_PORTRAIT_PATH).arrayBuffer();
+    if (buf.byteLength === 0) throw new Error('portrait file is empty');
+    // The data URL hard-codes image/png, so check the file really is one — a
+    // truncated checkout or a swapped file should fail here (before quota is
+    // reserved) rather than as a provider error the user pays for.
+    if (!Buffer.from(buf.slice(0, PNG_SIGNATURE.length)).equals(PNG_SIGNATURE)) {
+      throw new Error('portrait file is not a PNG');
+    }
+    const b64 = Buffer.from(buf).toString('base64');
+    cachedSelfPortraitPart = {
+      type: 'image_url',
+      image_url: { url: `data:${SELF_PORTRAIT_MIME};base64,${b64}` },
+    };
+    log(`[imagegen] loaded self-portrait reference ${SELF_PORTRAIT_PATH} (${Math.round(buf.byteLength / 1024)} KB)`);
+    return cachedSelfPortraitPart;
+  } catch (err) {
+    selfPortraitLoadFailed = true;
+    logError(`[imagegen] failed to load self-portrait at ${SELF_PORTRAIT_PATH}:`, err);
+    return null;
+  }
+}
+
+/** Test seam — drops the cached portrait (and any remembered load failure). */
+export function resetSelfPortraitCache(): void {
+  cachedSelfPortraitPart = null;
+  selfPortraitLoadFailed = false;
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
@@ -145,6 +222,27 @@ export async function runImageGeneration(opts: {
     };
   }
 
+  // Self-portrait reference (Marv only). Like the attached-image checks above,
+  // everything that can reject the call happens before quota reservation.
+  const wantsSelfPortrait = opts.args?.use_self_portrait === true;
+  if (wantsSelfPortrait && !ctx.selfPortrait) {
+    return {
+      ok: false,
+      error: 'Error: "use_self_portrait" is not available to you. Retry without it.',
+    };
+  }
+  let selfPortraitPart: any = null;
+  if (wantsSelfPortrait) {
+    selfPortraitPart = await getSelfPortraitPart();
+    if (!selfPortraitPart) {
+      return {
+        ok: false,
+        error: 'Error: your reference portrait is unavailable, so an accurate picture of you cannot be made. '
+          + 'Do NOT retry with use_self_portrait — tell the user this is temporarily broken.',
+      };
+    }
+  }
+
   // Atomically count + insert the quota row (fail closed: DB errors block generation).
   let reservationId: number | null = null;
   try {
@@ -168,13 +266,19 @@ export async function runImageGeneration(opts: {
     });
   };
 
-  log(`[imagegen] user ${ctx.userId} generating${useAttached ? ` (editing ${imageParts.length} attached image${imageParts.length === 1 ? '' : 's'})` : ''}: ${prompt.slice(0, 120)}`);
+  log(`[imagegen] user ${ctx.userId} generating${useAttached ? ` (editing ${imageParts.length} attached image${imageParts.length === 1 ? '' : 's'})` : ''}${selfPortraitPart ? ' (self-portrait reference)' : ''}: ${prompt.slice(0, 120)}`);
 
-  // For edits the request carries the source images as multimodal content
-  // parts alongside the instruction text (base64 data URLs, never persisted).
-  const userContent = useAttached
-    ? [{ type: 'text', text: prompt }, ...imageParts]
-    : prompt;
+  // For edits (and self-portraits) the request carries the source images as
+  // multimodal content parts alongside the instruction text (base64 data URLs,
+  // never persisted). The portrait leads so it reads as the character reference.
+  const sourceParts = [
+    ...(selfPortraitPart ? [selfPortraitPart] : []),
+    ...(useAttached ? imageParts : []),
+  ];
+  const instruction = selfPortraitPart ? `${SELF_PORTRAIT_INSTRUCTION}${prompt}` : prompt;
+  const userContent = sourceParts.length > 0
+    ? [{ type: 'text', text: instruction }, ...sourceParts]
+    : instruction;
 
   let dataUrl = '';
   try {
@@ -211,7 +315,10 @@ export async function runImageGeneration(opts: {
   return {
     ok: true,
     attachment: { attachment: buffer, name: `imgen-${Date.now()}.${ext}` },
-    resultText: `Image ${useAttached ? 'edited' : 'generated'} successfully from prompt "${prompt.slice(0, 200)}". `
+    // "of you" survives a combined call — a self-portrait built on the user's
+    // attached image is still a picture of Marv, and the model shouldn't
+    // describe it as a plain edit.
+    resultText: `Image ${selfPortraitPart ? 'of you ' : ''}${useAttached ? 'edited' : 'generated'} successfully from prompt "${prompt.slice(0, 200)}". `
       + 'It is attached to your reply automatically — do not write a link, markdown image, or placeholder for it; '
       + 'just describe it briefly.',
   };

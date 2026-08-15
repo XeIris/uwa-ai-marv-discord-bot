@@ -231,9 +231,16 @@ const scriptHandlers = {
         providerRouting: persona.providerRouting,
         // Image generation is Discord-only (delivery rides this webhook); the
         // rate limit is keyed to the requesting Discord user. Attached images
-        // ride along as edit sources for the generate_image tool.
+        // ride along as edit sources for the generate_image tool. The
+        // self-portrait reference rides the same clubTools gate as Marv's other
+        // extras — it's his avatar, so no other persona should draw "itself".
         imageGen: hasMemory
-          ? { userId: message.author.id, db: (message.client as any).db, imageParts: imageEditParts }
+          ? {
+            userId: message.author.id,
+            db: (message.client as any).db,
+            imageParts: imageEditParts,
+            selfPortrait: persona.clubTools === true,
+          }
           : undefined,
         // Music generation rides the same webhook delivery; rate limit keyed
         // to the requesting Discord user.
