@@ -42,6 +42,9 @@
     }],
     "node/no-unsupported-features/node-builtins": ["error", {
       "version": ">=18.0.0"
+    }],
+    "node/no-unsupported-features/es-builtins": ["error", {
+      "version": ">=18.0.0"
     }]
   },
   "overrides": [

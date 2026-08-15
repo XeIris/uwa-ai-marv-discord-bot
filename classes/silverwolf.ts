@@ -1,5 +1,5 @@
 import {
-  Client, REST, Routes, type ClientOptions, type Message, type Interaction,
+  Client, REST, Routes, type ClientOptions, type Message, type Interaction, type GuildMember,
 } from 'discord.js';
 import path from 'path';
 import { createRequire } from 'node:module';
@@ -8,6 +8,7 @@ import { log, logError } from '../utils/log';
 // Note: Bun automatically reads .env files
 import keywordsJson from '../data/keywords.json';
 import scriptHandlers from './handlers/keywordsBehaviorHandler';
+import { handleGuildMemberAdd } from './handlers/welcomeHandler';
 import { EventScheduler } from './eventScheduler';
 import { loadAllowedServers } from '../utils/accessControl';
 import { loadResolvedServerConfig } from '../utils/serverConfig';
@@ -159,6 +160,9 @@ All wrongs reserved.
     });
     this.on('messageUpdate', (oldMessage: any, newMessage: any) => {
       this.processEdit(oldMessage, newMessage);
+    });
+    this.on('guildMemberAdd', (member: GuildMember) => {
+      handleGuildMemberAdd(this, member);
     });
     log('Listeners loaded.');
   }
