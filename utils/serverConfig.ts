@@ -6,12 +6,14 @@ export const SERVER_CONFIG_KEYS = {
   POKEMON_MYSTERY_CHANCE: 'pokemon_mystery_chance',
   SERIOUS_CHANNELS: 'serious_channels',
   EVENT_REMINDER_CHANNELS: 'event_reminder_channels',
+  WELCOME_CHANNELS: 'welcome_channels',
   MESSAGE_REACTS_ENABLED: 'message_reacts_enabled',
 } as const;
 
 export const SERVER_CHANNEL_LIST_KEYS = [
   SERVER_CONFIG_KEYS.SERIOUS_CHANNELS,
   SERVER_CONFIG_KEYS.EVENT_REMINDER_CHANNELS,
+  SERVER_CONFIG_KEYS.WELCOME_CHANNELS,
 ] as const;
 
 export type ServerChannelListKey = typeof SERVER_CHANNEL_LIST_KEYS[number];
@@ -84,6 +86,11 @@ export const DOCUMENTED_SERVER_CONFIG_KEYS: {
     defaultValue: 'none',
   },
   {
+    key: SERVER_CONFIG_KEYS.WELCOME_CHANNELS,
+    description: 'Channels that get the welcome card when a member joins. Unset = welcomes off for this server',
+    defaultValue: 'none',
+  },
+  {
     key: SERVER_CONFIG_KEYS.MESSAGE_REACTS_ENABLED,
     description: 'Keyword/script replies on messages (e.g. @grok, nya). 0 = off, 1 = on',
     defaultValue: '1',
@@ -121,6 +128,7 @@ export interface ResolvedServerConfig {
   pokemonMysteryChance: number;
   seriousChannelIds: string[];
   eventReminderChannelIds: string[];
+  welcomeChannelIds: string[];
   messageReactsEnabled: boolean;
 }
 
@@ -227,9 +235,11 @@ export async function loadResolvedServerConfig(
       DEFAULT_RATES[SERVER_CONFIG_KEYS.POKEMON_MYSTERY_CHANCE],
     ),
     seriousChannelIds: parseChannelIds(values.get(SERVER_CONFIG_KEYS.SERIOUS_CHANNELS)),
-    // Strict: these are posted to unattended on a timer, so a malformed id would
-    // just fail a fetch every tick. Duplicates are dropped by both parsers.
+    // Strict: these are posted to unattended (on a timer, or on a member join),
+    // so a malformed id would just fail a fetch every time. Duplicates are
+    // dropped by both parsers.
     eventReminderChannelIds: parseSnowflakeIds(values.get(SERVER_CONFIG_KEYS.EVENT_REMINDER_CHANNELS)),
+    welcomeChannelIds: parseSnowflakeIds(values.get(SERVER_CONFIG_KEYS.WELCOME_CHANNELS)),
     messageReactsEnabled: parseEnabledFlag(values.get(SERVER_CONFIG_KEYS.MESSAGE_REACTS_ENABLED), true),
   };
 }

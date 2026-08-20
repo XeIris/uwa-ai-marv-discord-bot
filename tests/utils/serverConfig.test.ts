@@ -31,7 +31,22 @@ describe('serverConfig utils', () => {
     expect(config.pokemonShinyChance).toBe(0.03);
     expect(config.pokemonMysteryChance).toBe(0.3);
     expect(config.seriousChannelIds).toEqual([]);
+    expect(config.welcomeChannelIds).toEqual([]);
     expect(config.messageReactsEnabled).toBe(true);
+  });
+
+  it('keeps only well-formed snowflakes in welcome_channels', async () => {
+    // Welcomes are posted unattended on a member join, so a malformed id must be
+    // dropped here rather than failing a channel fetch on every join.
+    const serverId = '123456789';
+    await db.serverConfig.setServerConfig(
+      serverId,
+      SERVER_CONFIG_KEYS.WELCOME_CHANNELS,
+      '111111111111111111, not-an-id, 222222222222222222, 111111111111111111',
+    );
+
+    const config = await loadResolvedServerConfig(db, serverId);
+    expect(config.welcomeChannelIds).toEqual(['111111111111111111', '222222222222222222']);
   });
 
   it('loads configured values for a server', async () => {

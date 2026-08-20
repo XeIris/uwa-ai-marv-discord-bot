@@ -1,24 +1,51 @@
 /**
- * Downloads the DejaVu fonts used by the diagram renderer (utils/diagramGen.ts)
- * into data/fonts/. Pinned to a matplotlib commit (which vendors the built TTFs)
- * and verified by SHA-256 so rendered output is reproducible.
+ * Downloads the fonts rendered into PNGs by the bot into data/fonts/. Every file
+ * is pinned to an upstream commit and verified by SHA-256 so output stays
+ * reproducible and a compromised upstream can't slip a different file in.
  *
- * DejaVu is used rather than a prettier UI font because it actually has the
- * glyphs diagrams need — arrows (→ ← ↑ ↓), maths operators (Σ ∇ ∈ ≈ ≤ ∂), Greek
- * and box-drawing. Noto Sans silently drops every one of those.
+ * Two sets, for two renderers:
+ *
+ * - **DejaVu** — the diagram renderer (utils/diagramGen.ts). Used rather than a
+ *   prettier UI font because it actually has the glyphs diagrams need — arrows
+ *   (→ ← ↑ ↓), maths operators (Σ ∇ ∈ ≈ ≤ ∂), Greek and box-drawing. Noto Sans
+ *   silently drops every one of those. From matplotlib, which vendors the built TTFs.
+ * - **Bruno Ace** — the join-welcome card (utils/welcomeCard.ts), chosen for its
+ *   constructed, segmented sci-fi letterforms. It ships a single 400 weight, so
+ *   the card fakes bold by stroking the outlines; see welcomeCard.ts. Latin-only,
+ *   which is why the card keeps DejaVu loaded behind it as a glyph fallback for
+ *   non-Latin display names. From google/fonts, SIL Open Font License 1.1.
  *
  * Usage: bun scripts/fetch-fonts.ts
  * (Run once for local dev; the Dockerfile runs it at build time.)
  */
 
-const COMMIT = 'ba0ff3afcb1d9df725624256562e5c6a888ca46a';
-const BASE = `https://raw.githubusercontent.com/matplotlib/matplotlib/${COMMIT}/lib/matplotlib/mpl-data/fonts/ttf`;
+const MPL_COMMIT = 'ba0ff3afcb1d9df725624256562e5c6a888ca46a';
+const MPL_BASE = `https://raw.githubusercontent.com/matplotlib/matplotlib/${MPL_COMMIT}/lib/matplotlib/mpl-data/fonts/ttf`;
+const GF_COMMIT = '3169bfdfe4ba6ccab2f5d7f5a377c8d88d6b5bfc';
+const GF_BASE = `https://raw.githubusercontent.com/google/fonts/${GF_COMMIT}/ofl`;
 const DEST_DIR = `${import.meta.dir}/../data/fonts`;
 
-const FONTS: { file: string; sha256: string }[] = [
-  { file: 'DejaVuSans.ttf', sha256: '3fdf69cabf06049ea70a00b5919340e2ce1e6d02b0cc3c4b44fb6801bd1e0d22' },
-  { file: 'DejaVuSans-Bold.ttf', sha256: 'b184b89e3c1075f22f6b71575b6fc20d4972b3cfd3b23322ca6fd596dcaef167' },
-  { file: 'DejaVuSansMono.ttf', sha256: '602ec86b8948cfcd956482fe64f94c36c867770149ef2f791d4613f443bcecb3' },
+const FONTS: { file: string; url: string; sha256: string }[] = [
+  {
+    file: 'DejaVuSans.ttf',
+    url: `${MPL_BASE}/DejaVuSans.ttf`,
+    sha256: '3fdf69cabf06049ea70a00b5919340e2ce1e6d02b0cc3c4b44fb6801bd1e0d22',
+  },
+  {
+    file: 'DejaVuSans-Bold.ttf',
+    url: `${MPL_BASE}/DejaVuSans-Bold.ttf`,
+    sha256: 'b184b89e3c1075f22f6b71575b6fc20d4972b3cfd3b23322ca6fd596dcaef167',
+  },
+  {
+    file: 'DejaVuSansMono.ttf',
+    url: `${MPL_BASE}/DejaVuSansMono.ttf`,
+    sha256: '602ec86b8948cfcd956482fe64f94c36c867770149ef2f791d4613f443bcecb3',
+  },
+  {
+    file: 'BrunoAce-Regular.ttf',
+    url: `${GF_BASE}/brunoace/BrunoAce-Regular.ttf`,
+    sha256: '2ebb34cae30afcb6859757b8c0cc49c49203781216e4446e07a77046c633cc2b',
+  },
 ];
 
 async function sha256Hex(data: ArrayBuffer): Promise<string> {
@@ -47,7 +74,7 @@ async function downloadWithRetry(url: string, attempts: number): Promise<ArrayBu
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
-async function fetchOne(font: { file: string; sha256: string }): Promise<void> {
+async function fetchOne(font: { file: string; url: string; sha256: string }): Promise<void> {
   const dest = `${DEST_DIR}/${font.file}`;
   const existing = Bun.file(dest);
   if (await existing.exists()) {
@@ -59,9 +86,8 @@ async function fetchOne(font: { file: string; sha256: string }): Promise<void> {
     console.log(`Existing ${font.file} failed checksum — re-downloading.`);
   }
 
-  const url = `${BASE}/${font.file}`;
-  console.log(`Downloading ${font.file} from ${url} ...`);
-  const data = await downloadWithRetry(url, 3);
+  console.log(`Downloading ${font.file} from ${font.url} ...`);
+  const data = await downloadWithRetry(font.url, 3);
   const hash = await sha256Hex(data);
   if (hash !== font.sha256) {
     throw new Error(`Checksum mismatch for ${font.file}!\n  expected ${font.sha256}\n  got      ${hash}`);

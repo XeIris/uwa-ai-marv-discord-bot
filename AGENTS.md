@@ -8,7 +8,7 @@ Not a GitHub fork and no shared commit history (squashed import), so upstream ch
 `git cherry-pick` from the `upstream` remote, never by merge. Upstream is **unlicensed** — don't
 copy its code into anything else without asking its authors first.
 
-**Last updated: 2026-08-08**
+**Last updated: 2026-08-15**
 
 > **Maintenance rule.** Edit agent docs only on *substantive architectural* change — new
 > architecture, new auth, new data flows/services, schema or security-model changes, or when
@@ -29,6 +29,7 @@ duplicate their content here.
 | `utils/ai.ts`, `utils/aiPricing.ts`, `utils/llmRetry.ts`, `commands/ai*.ts`, `AiUsageModel` | `.claude/rules/ai-limits.md` — credit metering, retry policy |
 | `commands/committee_*`, `commands/event_*`, `utils/clubInfo.ts`, the club models | `.claude/rules/club-data.md` — roster, events, constitution |
 | `utils/diagramGen.ts`, `data/skills/diagram-guide.md`, `scripts/fetch-fonts.ts` | `.claude/rules/diagrams.md` — render_diagram, markup allowlists |
+| `utils/welcomeCard.ts`, `classes/handlers/welcomeHandler.ts`, `commands/dev_welcome_test.ts` | `.claude/rules/welcome.md` — join welcome card |
 | `Dockerfile`, `docker-compose.yaml`, `scripts/**` | `.claude/rules/deploy.md` — image, volumes |
 
 ## Commands
@@ -41,7 +42,8 @@ Boot locally: `bun install` → create `.env` (see `.env.example`) → `bun run 
 - `bun run lint` / `lint:fix` — ESLint (airbnb-base + node + promise).
 - `bun run typecheck` — `tsc --noEmit`.
 - `bun run fetch:soundfont` — download the GM soundfont for the JAYDON music generator.
-- `bun run fetch:fonts` — download the DejaVu fonts for the diagram renderer.
+- `bun run fetch:fonts` — download the fonts for the diagram renderer (DejaVu) and the welcome
+  card (Bruno Ace).
 - `bun run fetch:constitution` — regenerate `data/skills/constitution.md` from the club's LaTeX source.
 - `bun run seed:committee <guild-id>` — one-off seed of the `Committee` table from the gitignored
   `data/committee-seed.json` (run with the bot stopped).
@@ -72,10 +74,14 @@ boundaries so "marvel" doesn't summon him. Every user prompt is also tagged
 birthday/baby/football schedulers, pokemon handlers, and the quote system. `data/keywords.json` has
 a single entry (the AI triggers). Don't resurrect these without saying so.
 
+**Join welcomes:** a member joining an opted-in guild gets a rendered welcome card — the club
+artwork with their avatar composited in — posted to `welcome_channels`. Opt-in only; unset means
+silent. See `.claude/rules/welcome.md`.
+
 **Public commands:** `/links` (static club links, no AI credits), `/committee list`, `/event list`.
 
 **Dev/admin commands kept** (generic, not tied to stripped features): `/eval`, `/execute`,
-`/ping dev`, `/dev ramstats`, `/dbdump`, `/logdump`, `/serverconfig get|setchannel|
+`/ping dev`, `/dev ramstats`, `/dev welcome_test`, `/dbdump`, `/logdump`, `/serverconfig get|setchannel|
 setrole|setvalue`, `/globalconfig get|set`, `/blacklist configure|view`, `/server register|
 unregister`.
 
@@ -101,7 +107,8 @@ a global `banned` kill-switch. `DevCommand` enforces `isDev` before running.
 
 **Events** (wired in `classes/silverwolf.ts`): `messageCreate` → the single AI keyword trigger
 (`marv`/`@grok` etc. → `keywordsBehaviorHandler`); `interactionCreate` → command dispatch +
-autocomplete; message delete/edit tracked for history.
+autocomplete; `guildMemberAdd` → the join welcome card (`welcomeHandler`, off unless the guild
+sets `welcome_channels`); message delete/edit tracked for history.
 
 **Scheduler.** `classes/eventScheduler.ts` is the only background timer — started after `login()`,
 stopped on shutdown. It posts event reminders and is **off** for any guild that hasn't set
@@ -111,7 +118,8 @@ stopped on shutdown. It posts event reminders and is **off** for any guild that 
 `utils/tokenizer.ts` (context trimming), `utils/aiPricing.ts` + `utils/discordRateLimit.ts` (credits),
 `utils/llmRetry.ts` (retry policy), `utils/mcp.ts` (web-search MCP client), `utils/imageGen.ts` +
 `utils/musicGen.ts` + `utils/diagramGen.ts` + `utils/aiMedia.ts` (media tools),
-`utils/pdf.ts` (PDF extraction), `utils/clubInfo.ts` (club data tools).
+`utils/pdf.ts` (PDF extraction), `utils/clubInfo.ts` (club data tools),
+`utils/welcomeCard.ts` (join welcome card).
 
 ## Security & performance guardrails
 
@@ -129,8 +137,8 @@ stopped on shutdown. It posts event reminders and is **off** for any guild that 
 - **`persistence/` holds all runtime data** (SQLite DB + logs) and is the Docker volume — nothing
   written elsewhere survives a redeploy.
 - The JAYDON music generator needs `data/soundfonts/GeneralUser-GS.sf2` (gitignored) — fetch it
-  with `bun run fetch:soundfont` before first use. The diagram renderer likewise needs
-  `data/fonts/*.ttf` — `bun run fetch:fonts`.
+  with `bun run fetch:soundfont` before first use. The diagram renderer and the welcome card
+  likewise need `data/fonts/*.ttf` — `bun run fetch:fonts`.
 - **`render_diagram` renders model-authored markup.** Its HTML and SVG allowlists are a security
   boundary (no resource loading, no code, no entity expansion), not a formatting preference — see
   `.claude/rules/diagrams.md` before touching them.
