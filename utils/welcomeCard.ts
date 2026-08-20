@@ -175,6 +175,45 @@ function ensureWasm(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
+ * Reads a response body, giving up as soon as it passes MAX_AVATAR_BYTES.
+ *
+ * `content-length` is optional, so a chunked response can declare nothing and
+ * still be enormous — buffering it whole with `arrayBuffer()` would let the
+ * sender pick how much memory we spend. Reading chunk by chunk and cancelling
+ * on overrun caps that at the limit plus one chunk. Returns null if the cap was
+ * hit, which the caller treats the same as any other unusable avatar.
+ */
+async function readCapped(res: Response): Promise<Buffer | null> {
+  if (!res.body) {
+    const whole = Buffer.from(await res.arrayBuffer());
+    return whole.byteLength > MAX_AVATAR_BYTES ? null : whole;
+  }
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      // eslint-disable-next-line no-await-in-loop
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > MAX_AVATAR_BYTES) {
+        // Cancel rather than drain: the rest of an oversized body is bytes we
+        // have already decided not to spend memory on.
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks);
+}
+
+/**
  * Fetches an avatar and returns it as a data URI, or null if anything is off.
  *
  * Null is a normal outcome, not an error path worth failing the card over: a
@@ -207,17 +246,22 @@ export async function fetchAvatarDataUri(url: string): Promise<string | null> {
       log(`[welcome] avatar declares ${declared} bytes (> ${MAX_AVATAR_BYTES}); rendering without one`);
       return null;
     }
-    const buf = await res.arrayBuffer();
-    // Re-check after the read: content-length is a claim, byteLength is a fact.
-    if (buf.byteLength === 0 || buf.byteLength > MAX_AVATAR_BYTES) {
-      log(`[welcome] avatar is ${buf.byteLength} bytes; rendering without one`);
+    const buf = await readCapped(res);
+    // Null means the cap was hit mid-read: content-length is a claim, the bytes
+    // actually delivered are the fact.
+    if (buf === null) {
+      log(`[welcome] avatar exceeds ${MAX_AVATAR_BYTES} bytes; rendering without one`);
       return null;
     }
-    if (!Buffer.from(buf.slice(0, PNG_SIGNATURE.length)).equals(PNG_SIGNATURE)) {
+    if (buf.byteLength === 0) {
+      log('[welcome] avatar response is empty; rendering without one');
+      return null;
+    }
+    if (!buf.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
       log('[welcome] avatar response is not a PNG; rendering without one');
       return null;
     }
-    return `data:image/png;base64,${Buffer.from(buf).toString('base64')}`;
+    return `data:image/png;base64,${buf.toString('base64')}`;
   } catch (err) {
     logError('[welcome] avatar fetch failed; rendering without one:', err);
     return null;

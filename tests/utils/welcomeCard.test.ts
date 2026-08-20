@@ -97,6 +97,33 @@ describe('fetchAvatarDataUri', () => {
     expect(await fetchAvatarDataUri('https://cdn.discordapp.com/avatars/1/a.png')).toBeNull();
   });
 
+  it('stops reading an oversized chunked body instead of buffering it whole', async () => {
+    // No content-length, so the declared-size check cannot help: the cap has to
+    // be enforced against the bytes as they arrive. The stream hands out 1MB at
+    // a time and would go on well past the limit if nobody cancelled it.
+    const CHUNK = 1024 * 1024;
+    let pulled = 0;
+    let cancelled = false;
+    globalThis.fetch = (async () => new Response(new ReadableStream({
+      pull(controller) {
+        pulled += 1;
+        if (pulled > 64) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(new Uint8Array(pulled === 1
+          ? Buffer.concat([PNG_SIGNATURE, Buffer.alloc(CHUNK - PNG_SIGNATURE.length)])
+          : Buffer.alloc(CHUNK)));
+      },
+      cancel() { cancelled = true; },
+    }))) as any;
+
+    expect(await fetchAvatarDataUri('https://cdn.discordapp.com/avatars/1/a.png')).toBeNull();
+    expect(cancelled).toBe(true);
+    // Cancelled early rather than after draining all 64MB the stream offered.
+    expect(pulled).toBeLessThan(16);
+  });
+
   it('rejects a non-ok response', async () => {
     globalThis.fetch = (async () => new Response('nope', { status: 404 })) as any;
     expect(await fetchAvatarDataUri('https://cdn.discordapp.com/avatars/1/a.png')).toBeNull();

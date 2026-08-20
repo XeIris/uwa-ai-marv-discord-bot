@@ -94,6 +94,13 @@ export async function handleGuildMemberAdd(client: any, member: any): Promise<vo
           log(`[welcome] channel ${channelId} in guild ${guildId} is not text-based; skipping`);
           continue;
         }
+        // channels.fetch is client-wide, not guild-scoped: a stale or mistyped
+        // id in this guild's config can resolve to a channel in another guild
+        // the bot is in, and we would post someone's join card to strangers.
+        if ((channel as { guildId?: string | null }).guildId !== guildId) {
+          log(`[welcome] channel ${channelId} is not in guild ${guildId}; skipping`);
+          continue;
+        }
         // Rebuilt per channel: an AttachmentBuilder wraps a stream that discord.js
         // consumes on send, so re-sending the same instance uploads nothing.
         // eslint-disable-next-line no-await-in-loop
