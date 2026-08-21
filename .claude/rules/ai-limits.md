@@ -88,4 +88,5 @@ downloaded) and both `/summary` subcommands. **A new AI entry point must call it
   agreed to and everyone is re-prompted. Cosmetic edits don't need a bump.
 - Acceptances are cached in a Map inside `AiConsentModel` — the gate is on the hot path of every
   message that mentions Marv. Nothing is cached without a committed row behind it.
-- `db.aiConsent.revoke(userId)` withdraws consent (re-prompts next time). No command exposes it yet.
+- `/ai forget` (`commands/ai_forget.ts` → `db.aiConsent.revoke`) withdraws consent and re-prompts
+  next time. It touches consent only — stored conversations are `/ai chatdelete`'s job.

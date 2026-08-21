@@ -55,7 +55,7 @@ in the DB `GlobalConfig` table and override/augment env.
 
 **AI features:** keyword-triggered AI chat (say `marv`/`@grok`/`@ds`/etc. → webhook replies via
 `classes/handlers/keywordsBehaviorHandler.ts` → `utils/ai.ts`), per-user chat sessions
-(`/ai view|chatnew|chatswitch|chatdelete|retitle`, `AiChatModel`), credit metering (`/ai usage`,
+(`/ai view|chatnew|chatswitch|chatdelete|retitle|forget`, `AiChatModel`), credit metering (`/ai usage`,
 `AiUsageModel`), AI chat summaries (`/summary count|time`), and the web-search / image-generation /
 music-generation (JAYDON) / diagram-rendering tools that ride along in chat. Personas live in
 `data/aiPersonas.json`.
