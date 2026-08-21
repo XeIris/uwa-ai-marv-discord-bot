@@ -193,6 +193,9 @@ const scriptHandlers = {
     let historyLoaded = false;
     let hadRawHistory = false;
     let contextWarnings: { level: number; message: string; wasTrimmed: boolean; trimmedCount: number }[] = [];
+    // Kept so the text-only fallback below can re-trim from the untrimmed set
+    // rather than from a window budgeted for a different model.
+    let filteredHistory: any[] = [];
     if (hasMemory) {
       try {
         aiSession = await (message.client as any).db.aiChat.getOrCreateSession(
@@ -204,13 +207,15 @@ const scriptHandlers = {
 
         // Tool rows are audit-only and get filtered out before replay anyway —
         // exclude them from the token budget so they don't crowd out real turns.
-        const filteredHistory = rawHistory.filter((h: { role: string }) => h.role !== 'tool');
+        filteredHistory = rawHistory.filter((h: { role: string }) => h.role !== 'tool');
 
         // Token-based sliding window: trim oldest messages to fit context.
         // Budgeted against the model this turn will actually run on — a dual-
-        // routed persona's two models can have different context windows. A
-        // vision turn that falls back to text-only keeps this budget, which is
-        // safe as long as the text model's window is no smaller.
+        // routed persona's two models can have different context windows, and
+        // the text model's can be the smaller of the two (Marv: 262k on
+        // DeepSeek against 1.05M on the vision route). A vision turn that falls
+        // back to text-only therefore re-trims against the text budget before
+        // retrying; see the catch below.
         const { trimmedHistory, warnings } = await trimHistoryToFit(
           persona.provider,
           resolveTurnModel(persona, mediaParts.length > 0).model,
@@ -290,6 +295,25 @@ const scriptHandlers = {
         if (mediaParts.length === 0) throw genErr;
         logError('AiChat: generation with media failed, retrying text-only:', genErr);
         mediaDropped = true;
+        // The history above was trimmed to the vision model's window. Retrying
+        // on a text model with a smaller one would resend an oversized request
+        // and fail the fallback too, so re-trim before the retry.
+        if (historyLoaded) {
+          try {
+            const retryTrim = await trimHistoryToFit(
+              persona.provider,
+              resolveTurnModel(persona, false).model,
+              persona.systemPrompt ?? '',
+              filteredHistory,
+              prompt,
+              persona.webSearchEnabled,
+            );
+            history = retryTrim.trimmedHistory;
+            contextWarnings = retryTrim.warnings;
+          } catch (trimErr) {
+            logError('AiChat: failed to re-trim history for the text-only retry:', trimErr);
+          }
+        }
         genResult = await generateOnce(false);
       } finally {
         // Buffers are only referenced by these arrays; free the slot as soon

@@ -34,6 +34,9 @@ const REQUIRED_PERMISSIONS: [bigint, string][] = [
   [PermissionsBitField.Flags.MentionEveryone, 'Mention @everyone'],
 ];
 
+/** Channel types an announcement may target: guild text (0) and announcement (5). */
+const ANNOUNCEABLE_CHANNEL_TYPES: readonly number[] = [0, 5];
+
 class EventAnnounce extends AdminCommand {
   constructor(client: any) {
     super(client, 'announce', 'Announce an event with an @everyone ping', [
@@ -41,7 +44,7 @@ class EventAnnounce extends AdminCommand {
         name: 'event', description: 'Which event to announce', type: 4, required: true, autocomplete: true,
       },
       {
-        name: 'channel', description: 'Where to post it (defaults to this channel)', type: 7, channel_types: [0, 5],
+        name: 'channel', description: 'Where to post it (defaults to this channel)', type: 7, channel_types: ANNOUNCEABLE_CHANNEL_TYPES,
       },
       { name: 'message', description: 'A line of your own, above the embed', type: 3 },
       {
@@ -77,8 +80,13 @@ class EventAnnounce extends AdminCommand {
     }
 
     const channel = interaction.options.getChannel('channel') ?? interaction.channel;
-    if (!channel?.isTextBased?.()) {
-      await interaction.editReply('Pick a text channel to announce in.');
+    // Same whitelist the `channel` option declares. The implicit fallback
+    // bypasses that declaration, and isTextBased() alone would let threads and
+    // voice text through — where posting needs a different permission than the
+    // one checked below, so the send would fail into the generic catch instead
+    // of saying what's actually wrong.
+    if (!ANNOUNCEABLE_CHANNEL_TYPES.includes(channel?.type)) {
+      await interaction.editReply('Pick a text or announcement channel to announce in.');
       return;
     }
 

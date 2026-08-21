@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { resolveTurnModel, type Persona } from '../../utils/ai';
 import personas from '../../data/aiPersonas.json';
+import { getContextLimit, trimHistoryToFit } from '../../utils/tokenizer';
 
 const dual: Persona = {
   name: 'Dual',
@@ -72,5 +73,31 @@ describe('Marv persona wiring', () => {
       require_parameters: true,
       data_collection: 'deny',
     });
+  });
+});
+
+describe('the text-only fallback budget', () => {
+  const marv = (personas as any).personas.find((p: any) => p.name === 'Marv') as Persona;
+
+  test('Marv\'s text route has the smaller context window', () => {
+    // This asymmetry is the whole reason keywordsBehaviorHandler re-trims before
+    // retrying text-only. History trimmed to fit the vision window can overflow
+    // the text one, and the retry that was meant to rescue the reply would 400.
+    expect(getContextLimit(marv.model)).toBeLessThan(getContextLimit(marv.visionModel!));
+  });
+
+  test('history that fits the vision window is trimmed for the text model', async () => {
+    // Sized between the two windows: comfortably inside 1.05M tokens, well past
+    // 262k. Each entry is ~40k tokens at the tokenizer's 4-chars-per-token rate.
+    const history = Array.from({ length: 12 }, (_, i) => ({
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      message: 'x'.repeat(160_000),
+    }));
+
+    const onVision = await trimHistoryToFit('openrouter', marv.visionModel!, '', history, 'hello', false);
+    const onText = await trimHistoryToFit('openrouter', marv.model, '', history, 'hello', false);
+
+    expect(onVision.trimmedHistory).toHaveLength(history.length);
+    expect(onText.trimmedHistory.length).toBeLessThan(history.length);
   });
 });

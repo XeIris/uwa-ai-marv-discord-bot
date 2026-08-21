@@ -31,6 +31,21 @@ export interface EventNoticeEntry {
   sentAt: string | null;
 }
 
+/**
+ * Parses a stored `created_at` as UTC.
+ *
+ * New rows carry an ISO string (see queueWithin). Rows written before that
+ * carry SQLite's `CURRENT_TIMESTAMP` form, `YYYY-MM-DD HH:MM:SS`, which is UTC
+ * but has no timezone designator — and ECMAScript parses that date-time form as
+ * *local* time. On a UTC+8 host that reads eight hours off, which is enough to
+ * push a notice past the staleness cutoff or hold one back well beyond it, so
+ * the designator is supplied when it is missing.
+ */
+export function parseNoticeTimestamp(value: string): Date {
+  const naive = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(value);
+  return new Date(naive ? `${value.replace(' ', 'T')}Z` : value);
+}
+
 /** One before/after pair. `touched` false means this edit left the field alone. */
 export interface FieldChange {
   touched: boolean;
@@ -163,6 +178,7 @@ class EventNoticeModel {
       oldLocation,
       newLocation,
       droppedLeads,
+      new Date().toISOString(),
     );
   }
 }

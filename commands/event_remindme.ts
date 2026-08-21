@@ -47,13 +47,25 @@ class EventRemindMe extends Command {
     }
 
     const id = interaction.options.getInteger('event');
+    if (!Number.isInteger(id) || id <= 0) {
+      await interaction.editReply('Pick an event from the list.');
+      return;
+    }
     const event = await this.client.db.event.getById(interaction.guild.id, id);
     if (!event) {
       await interaction.editReply(`No event with id \`${id}\` in this server.`);
       return;
     }
 
-    const lead = toReminderLead(interaction.options.getString('when'));
+    // Kept raw so "omitted" stays distinguishable from "supplied but not one of
+    // the choices" — collapsing both to null would silently show the current
+    // reminders instead of saying the lead wasn't understood.
+    const rawWhen = interaction.options.getString('when');
+    const lead = toReminderLead(rawWhen);
+    if (rawWhen !== null && !lead) {
+      await interaction.editReply(`\`${rawWhen}\` isn't a lead time I know — pick one from the list.`);
+      return;
+    }
     const cancelling = interaction.options.getBoolean('cancel') === true;
     const userId = interaction.user.id;
 

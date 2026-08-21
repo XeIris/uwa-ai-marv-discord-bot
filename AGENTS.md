@@ -64,9 +64,8 @@ music-generation (JAYDON) / diagram-rendering tools that ride along in chat. Per
 persona with `clubTools: true`, which grants read-only tools backed by our own data: the committee
 roster (`/committee`), the events calendar (`/event`), the club constitution, four hand-maintained
 reference sheets (official links — also `/links`, UWA key dates, student perks, club FAQ), and UWA
-handbook unit lookup. Marv is **dual-routed**: text turns run on DeepSeek V4 Flash, turns with
-attached images on GPT-5.6 Luna (that DeepSeek model is text-only) — see
-`.claude/rules/ai-limits.md`. Marv also answers to his bare name (`marv`, no `@`), matched on word
+handbook unit lookup. Marv is **dual-routed** — image turns take a different model from text turns;
+the models and the routing rationale live in `.claude/rules/ai-limits.md`. Marv also answers to his bare name (`marv`, no `@`), matched on word
 boundaries so "marvel" doesn't summon him. Every user prompt is also tagged
 `[date]-[committee title]-[username]-` so any persona knows who it's talking to. See
 `.claude/rules/club-data.md`.

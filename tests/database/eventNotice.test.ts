@@ -2,6 +2,7 @@ import {
   describe, test, expect, beforeAll, afterAll, beforeEach,
 } from 'bun:test';
 import Database from '../../database/Database';
+import { parseNoticeTimestamp } from '../../database/models/EventNoticeModel';
 
 const SERVER = '111';
 const USER = 'u1';
@@ -195,5 +196,63 @@ describe('EventNotice queueing', () => {
     await db.event.update(SERVER, eventId, { startsAt: startsIn(96) });
     expect(await dmNotices()).toHaveLength(0);
     expect(await channelNotices()).toHaveLength(1);
+  });
+});
+
+describe('notice timestamps', () => {
+  test('queued notices carry a UTC-designated created_at', async () => {
+    const db = new Database(`./tests/temp/testNoticeStamp-${Date.now()}.db`);
+    await db.ready;
+    try {
+      const id = (await db.event.create(SERVER, { name: 'Workshop', startsAt: startsIn(72) }))!;
+      await db.event.update(SERVER, id, { location: 'Ezone' });
+
+      const [notice] = await db.eventNotice.listDue(10);
+      // Not SQLite's bare `YYYY-MM-DD HH:MM:SS`, which has no offset and would
+      // be read as local time.
+      expect(notice.createdAt).toMatch(/Z$/);
+      expect(Number.isNaN(new Date(notice.createdAt).getTime())).toBe(false);
+    } finally {
+      db.db.close();
+    }
+  });
+
+  test('a legacy SQLite timestamp is read as UTC, not local time', () => {
+    // The bug this guards: `new Date('2026-08-20 12:00:00')` is local time per
+    // spec, so on a UTC+8 host it lands 8h from the instant SQLite recorded —
+    // enough to hold a notice back past the staleness cutoff or drop it early.
+    const legacy = parseNoticeTimestamp('2026-08-20 12:00:00');
+    expect(legacy.toISOString()).toBe('2026-08-20T12:00:00.000Z');
+
+    // ISO input is already unambiguous and must pass through untouched.
+    expect(parseNoticeTimestamp('2026-08-20T12:00:00.000Z').toISOString())
+      .toBe('2026-08-20T12:00:00.000Z');
+  });
+});
+
+describe('concurrent edits', () => {
+  test('a second edit does not revert fields the first one changed', async () => {
+    const db = new Database(`./tests/temp/testConcurrentEdit-${Date.now()}.db`);
+    await db.ready;
+    try {
+      const id = (await db.event.create(SERVER, {
+        name: 'Workshop', startsAt: startsIn(72), location: 'CSSE', description: 'first',
+      }))!;
+
+      // Two admins editing different fields at the same time. Each fills the
+      // fields it wasn't given from the row it read; if that read happens
+      // outside the transaction both load the same baseline and the second
+      // write stamps the first one's change back to its old value.
+      await Promise.all([
+        db.event.update(SERVER, id, { location: 'Ezone' }),
+        db.event.update(SERVER, id, { description: 'second' }),
+      ]);
+
+      const after = await db.event.getById(SERVER, id);
+      expect(after!.location).toBe('Ezone');
+      expect(after!.description).toBe('second');
+    } finally {
+      db.db.close();
+    }
   });
 });

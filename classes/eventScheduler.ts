@@ -5,7 +5,7 @@ import { discordTimestamp } from '../utils/perthTime';
 import { resolveAndPrune } from '../utils/eventImage';
 import type { EventEntry, ReminderKind } from '../database/models/EventModel';
 import type { DueEventReminder } from '../database/models/EventReminderModel';
-import { parseDroppedLeads } from '../database/models/EventNoticeModel';
+import { parseDroppedLeads, parseNoticeTimestamp } from '../database/models/EventNoticeModel';
 import type { EventNoticeEntry } from '../database/models/EventNoticeModel';
 import { LEAD_LABELS, toReminderLead } from '../utils/eventReminders';
 
@@ -374,7 +374,7 @@ export class EventScheduler {
   }
 
   private async deliverNotice(notice: EventNoticeEntry, now: Date): Promise<boolean> {
-    const stale = now.getTime() - new Date(notice.createdAt).getTime() > STALE_NOTICE_MS;
+    const stale = now.getTime() - parseNoticeTimestamp(notice.createdAt).getTime() > STALE_NOTICE_MS;
 
     let claimed = false;
     try {

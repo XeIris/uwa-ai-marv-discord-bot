@@ -116,9 +116,18 @@ export async function ensureAiConsent(
   try {
     const press = await prompt.awaitMessageComponent({
       componentType: ComponentType.Button,
-      // Only the person who triggered the AI can answer for themselves; anyone
-      // else pressing gets Discord's default "this isn't for you" behaviour.
-      filter: (i) => i.user.id === userId,
+      // Only the person who triggered the AI can answer for themselves. A
+      // rejected filter never acknowledges the press, so Discord would show the
+      // bystander "This interaction failed" after three seconds — reply to them
+      // ephemerally instead, then reject.
+      filter: (i) => {
+        if (i.user.id === userId) return true;
+        i.reply({
+          content: 'This notice is for someone else — mention the AI yourself to get your own.',
+          ephemeral: true,
+        }).catch((e) => { logError('AiConsent: failed to wave off a foreign button press:', e); });
+        return false;
+      },
       time: CONSENT_TIMEOUT_MS,
     });
 

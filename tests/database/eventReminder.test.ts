@@ -147,15 +147,22 @@ describe('EventReminderModel', () => {
   });
 
   test('a lead that no longer resolves is dropped on reschedule', async () => {
-    // Subscribed to "morning of" while the event was in the evening...
-    const event = await db.event.getById(SERVER, eventId);
-    await db.eventReminder.subscribe(SERVER, eventId, USER, 'morning', event!.startsAt);
-    await db.eventReminder.subscribe(SERVER, eventId, USER, 'day', event!.startsAt);
+    // A fixed 19:00 Perth (11:00 UTC) start, not the suite's rolling
+    // `startsIn(72)`: that can land at or before 09:00 Perth, where "morning of"
+    // never resolves and subscribe returns null — leaving the final assertion to
+    // pass without a morning reminder ever having existed to drop.
+    const evening = await db.event.create(SERVER, { name: 'Evening', startsAt: '2099-09-01T11:00:00.000Z' });
+    await db.eventReminder.subscribe(SERVER, evening!, USER, 'morning', '2099-09-01T11:00:00.000Z');
+    await db.eventReminder.subscribe(SERVER, evening!, USER, 'day', '2099-09-01T11:00:00.000Z');
+
+    // The premise: both leads resolved and are on record before the move.
+    const armed = await db.eventReminder.listForUserEvent(evening!, USER);
+    expect(armed.map((r) => r.lead).sort()).toEqual(['day', 'morning']);
 
     // ...then it moves to 08:00 Perth (00:00 UTC), which has no morning-of.
-    await db.event.update(SERVER, eventId, { startsAt: '2099-09-02T00:00:00.000Z' });
+    await db.event.update(SERVER, evening!, { startsAt: '2099-09-02T00:00:00.000Z' });
 
-    const rows = await db.eventReminder.listForUserEvent(eventId, USER);
+    const rows = await db.eventReminder.listForUserEvent(evening!, USER);
     expect(rows.map((r) => r.lead)).toEqual(['day']);
   });
 

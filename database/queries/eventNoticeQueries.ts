@@ -12,9 +12,9 @@ const eventNoticeQueries = {
     INSERT INTO EventNotice (
       event_id, server_id, target, user_id, kind, event_name,
       old_starts_at, new_starts_at, old_ends_at, new_ends_at,
-      old_location, new_location, dropped_leads, sent_at
+      old_location, new_location, dropped_leads, created_at, sent_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
     ON CONFLICT (event_id, target, user_id) DO UPDATE SET
       kind = excluded.kind,
       event_name = excluded.event_name,
@@ -25,6 +25,9 @@ const eventNoticeQueries = {
       old_location = excluded.old_location,
       new_location = excluded.new_location,
       dropped_leads = excluded.dropped_leads,
+      -- created_at is deliberately not updated: staleness is measured from when
+      -- the change was first queued, so a collapsing edit can't refresh a notice
+      -- indefinitely past the point where it's still worth sending.
       sent_at = NULL
   `,
   // A notice that collapsed back to no net change (moved, then moved back) is

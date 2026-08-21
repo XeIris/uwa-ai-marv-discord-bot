@@ -93,7 +93,10 @@ class EventEdit extends AdminCommand {
       return;
     }
 
-    const fresh = await this.client.db.event.getById(interaction.guild.id, id);
+    // The update succeeded; the re-fetch is only for the confirmation text. If
+    // the event was deleted in the gap, fall back to the pre-update row rather
+    // than throwing and reporting a failure for an edit that went through.
+    const fresh = (await this.client.db.event.getById(interaction.guild.id, id)) ?? existing;
     const lines = [
       `${discordTimestamp(fresh.startsAt)} (${discordTimestamp(fresh.startsAt, 'R')})`,
       `id \`${id}\``,

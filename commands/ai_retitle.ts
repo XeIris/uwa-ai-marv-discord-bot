@@ -2,6 +2,7 @@ import { EmbedBuilder } from 'discord.js';
 import { Command } from './classes/Command';
 import { logError } from '../utils/log';
 import { generateTitleForHistory } from '../utils/ai';
+import { ensureAiConsent } from '../utils/aiConsent';
 
 class AiRetitle extends Command {
   constructor(client: any) {
@@ -35,6 +36,16 @@ class AiRetitle extends Command {
   async run(interaction: any): Promise<void> {
     const userId = interaction.user.id;
     const sessionId = interaction.options.getInteger('session_id');
+
+    // Retitling replays stored conversation text to a provider to generate the
+    // title, so it's an AI entry point like any other and must not run
+    // un-acknowledged. Fails closed — ensureAiConsent has already explained why.
+    const consented = await ensureAiConsent(
+      this.client.db,
+      userId,
+      (payload: any) => interaction.editReply(payload),
+    );
+    if (!consented) return;
 
     try {
       if (sessionId !== null) {

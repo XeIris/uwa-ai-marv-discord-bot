@@ -1,4 +1,5 @@
 import eventQueries from '../queries/eventQueries';
+import { snakeToCamelJSON } from '../../utils/caseConvert';
 import EventReminderModel from './EventReminderModel';
 import EventNoticeModel, { CHANNEL_RECIPIENT, fieldChange } from './EventNoticeModel';
 import type { FieldChange } from './EventNoticeModel';
@@ -119,22 +120,28 @@ class EventModel {
    * one without the other would fire reminders against the old time.
    */
   async update(serverId: string, id: number, changes: EventInput): Promise<boolean> {
-    const existing = await this.getById(serverId, id);
-    if (!existing) return false;
-
-    const pick = <T>(next: T | undefined, current: T): T => (next === undefined ? current : next);
-    const name = pick(changes.name, existing.name);
-    const startsAt = pick(changes.startsAt, existing.startsAt);
-    const endsAt = pick(changes.endsAt, existing.endsAt);
-    const location = pick(changes.location, existing.location);
-    const startMoved = startsAt !== existing.startsAt;
-
-    const moved: FieldChange = fieldChange(existing.startsAt, startsAt);
-    const ends: FieldChange = fieldChange(existing.endsAt, endsAt);
-    const movedTo: FieldChange = fieldChange(existing.location, location);
-    const notifiable = moved.touched || ends.touched || movedTo.touched;
-
     return this.db.executeTransaction((rawDb) => {
+      // Read inside the transaction, not before it. Undefined fields are filled
+      // from the current row, so a read taken outside `BEGIN IMMEDIATE` lets two
+      // concurrent edits load the same baseline and the later write silently
+      // revert fields it never touched — UPDATE_EVENT matches on id alone, so
+      // the changes() guard below can't catch it. It would also compute the
+      // before/after pairs against a value that was already superseded.
+      const existing = EventModel.getByIdWithin(rawDb, serverId, id);
+      if (!existing) return false;
+
+      const pick = <T>(next: T | undefined, current: T): T => (next === undefined ? current : next);
+      const name = pick(changes.name, existing.name);
+      const startsAt = pick(changes.startsAt, existing.startsAt);
+      const endsAt = pick(changes.endsAt, existing.endsAt);
+      const location = pick(changes.location, existing.location);
+      const startMoved = startsAt !== existing.startsAt;
+
+      const moved: FieldChange = fieldChange(existing.startsAt, startsAt);
+      const ends: FieldChange = fieldChange(existing.endsAt, endsAt);
+      const movedTo: FieldChange = fieldChange(existing.location, location);
+      const notifiable = moved.touched || ends.touched || movedTo.touched;
+
       // Subscribers are read before the reschedule: it deletes the rows of anyone
       // whose only lead stops resolving, and they still need to be told.
       const subscriberIds = notifiable ? EventReminderModel.subscriberIdsWithin(rawDb, id) : [];
@@ -199,10 +206,13 @@ class EventModel {
    * notice has to outlive the row it's about.
    */
   async delete(serverId: string, id: number): Promise<boolean> {
-    const existing = await this.getById(serverId, id);
-    if (!existing) return false;
-
     return this.db.executeTransaction((rawDb) => {
+      // Read inside the transaction for the same reason as `update` — here a
+      // stale read would only mis-snapshot the name and start time carried on
+      // the cancellation notice, but the fix is the same.
+      const existing = EventModel.getByIdWithin(rawDb, serverId, id);
+      if (!existing) return false;
+
       EventReminderModel.subscriberIdsWithin(rawDb, id).forEach((userId) => {
         EventNoticeModel.queueWithin(rawDb, {
           eventId: id,
@@ -227,6 +237,17 @@ class EventModel {
       rawDb.query(eventQueries.DELETE_EVENT).run(id, serverId);
       return (rawDb.query('SELECT changes() AS changes').get() as { changes: number }).changes > 0;
     });
+  }
+
+  /**
+   * The same read as `getById`, on the raw handle so it can run *inside* a
+   * transaction. `executeSelectQuery` is not serialised through the transaction
+   * queue, so a read taken before `BEGIN IMMEDIATE` can be stale by the time the
+   * write lands — see the note in `update`.
+   */
+  private static getByIdWithin(rawDb: any, serverId: string, id: number): EventEntry | null {
+    const row = rawDb.query(eventQueries.GET_EVENT).get(id, serverId) as Record<string, any> | null;
+    return row ? (snakeToCamelJSON(row) as unknown as EventEntry) : null;
   }
 
   async getById(serverId: string, id: number): Promise<EventEntry | null> {
