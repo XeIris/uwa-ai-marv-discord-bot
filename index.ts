@@ -2,6 +2,7 @@ import { GatewayIntentBits, Options, Sweepers } from 'discord.js';
 import { log, logError } from './utils/log';
 import { Silverwolf } from './classes/silverwolf';
 import { shutdownMcp } from './utils/mcp';
+import { registerMemoryPressureHandler } from './utils/memoryPressure';
 
 // Note: Bun automatically reads .env files, no dotenv needed
 
@@ -39,6 +40,10 @@ const silverwolf = new Silverwolf(TOKEN, {
     },
   },
 });
+
+// Drop reclaimable discord.js caches when the OS reports it is short on memory,
+// rather than waiting for the container's 1 GB limit to OOM-kill the process.
+registerMemoryPressureHandler(silverwolf);
 
 silverwolf.login().then(() => silverwolf.registerCommands(CLIENT_ID));
 
