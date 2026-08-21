@@ -28,7 +28,16 @@ class EventDelete extends AdminCommand {
     }
 
     await this.client.db.event.delete(interaction.guild.id, id);
-    await interaction.editReply(`Deleted **${existing.name}** (id \`${id}\`).`);
+
+    // Queued inside the delete's transaction, before the subscriptions cascaded
+    // away — so this counts people who will hear it was cancelled.
+    const notices = await this.client.db.eventNotice.listForEvent(id);
+    const notified = notices.filter((notice: any) => notice.target === 'dm' && notice.sentAt === null).length;
+
+    const suffix = notified > 0
+      ? ` I'll let ${notified} subscriber${notified === 1 ? '' : 's'} know it's cancelled, and post it to the reminder channels.`
+      : '';
+    await interaction.editReply(`Deleted **${existing.name}** (id \`${id}\`).${suffix}`);
   }
 }
 

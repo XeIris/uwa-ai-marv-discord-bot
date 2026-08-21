@@ -94,12 +94,61 @@ export async function resolveAndPrune(client: any, db: any, event: EventEntry): 
   return url;
 }
 
-export const IMAGE_KEEP_WARNING = '⚠ **Don\'t delete this message** — the event\'s image is stored by pointing at it. '
-  + 'If this message goes, the image goes with it (the event itself stays).';
-
 /** Discord's own attachment content types we accept as an event image. */
 const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+/** Filename extension per accepted type — Discord renders by extension, not header. */
+const EXTENSION_BY_TYPE: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+};
+
+/**
+ * Downloads an event's image as raw bytes, ready to attach to a new message.
+ *
+ * `resolveAndPrune` hands back a *signed* CDN URL that expires in about a day —
+ * fine for a reminder that is read within the hour, wrong for an announcement
+ * that stays in the channel as the event's permanent notice. Re-uploading the
+ * bytes onto the announcement itself gives it an attachment of its own, which
+ * never goes stale and survives the original confirmation message being deleted.
+ *
+ * Returns null when the event has no image or it couldn't be fetched; callers
+ * post without it rather than failing.
+ */
+export async function fetchEventImageFile(
+  client: any,
+  db: any,
+  event: EventEntry,
+): Promise<{ attachment: Buffer; name: string } | null> {
+  const url = await resolveAndPrune(client, db, event).catch(() => null);
+  if (!url) return null;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      logError(`[eventimage] image download for event ${event.id} returned HTTP ${response.status}`);
+      return null;
+    }
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.byteLength > MAX_IMAGE_BYTES) {
+      // Can't happen through our own upload path (validateImageAttachment caps
+      // it), but this is a network read — don't trust the far end's size.
+      logError(`[eventimage] image for event ${event.id} is ${bytes.byteLength} bytes — over the limit, skipping`);
+      return null;
+    }
+    const contentType = String(response.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+    const extension = EXTENSION_BY_TYPE[contentType] ?? 'png';
+    return { attachment: bytes, name: `event-${event.id}.${extension}` };
+  } catch (err) {
+    logError(`[eventimage] failed to download image for event ${event.id}:`, err);
+    return null;
+  }
+}
+
+export const IMAGE_KEEP_WARNING = '⚠ **Don\'t delete this message** — the event\'s image is stored by pointing at it. '
+  + 'If this message goes, the image goes with it (the event itself stays).';
 
 /** Validates an uploaded attachment before we re-post it. Returns an error string, or null. */
 export function validateImageAttachment(attachment: any): string | null {

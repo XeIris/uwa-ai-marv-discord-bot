@@ -8,7 +8,7 @@ Not a GitHub fork and no shared commit history (squashed import), so upstream ch
 `git cherry-pick` from the `upstream` remote, never by merge. Upstream is **unlicensed** — don't
 copy its code into anything else without asking its authors first.
 
-**Last updated: 2026-08-15**
+**Last updated: 2026-08-21**
 
 > **Maintenance rule.** Edit agent docs only on *substantive architectural* change — new
 > architecture, new auth, new data flows/services, schema or security-model changes, or when
@@ -78,7 +78,8 @@ a single entry (the AI triggers). Don't resurrect these without saying so.
 artwork with their avatar composited in — posted to `welcome_channels`. Opt-in only; unset means
 silent. See `.claude/rules/welcome.md`.
 
-**Public commands:** `/links` (static club links, no AI credits), `/committee list`, `/event list`.
+**Public commands:** `/links` (static club links, no AI credits), `/committee list`, `/event list`,
+`/event remindme` (per-member DM reminders before an event).
 
 **Dev/admin commands kept** (generic, not tied to stripped features): `/eval`, `/execute`,
 `/ping dev`, `/dev ramstats`, `/dev welcome_test`, `/dbdump`, `/logdump`, `/serverconfig get|setchannel|
@@ -112,13 +113,16 @@ sets `welcome_channels`); message delete/edit tracked for history.
 
 **Scheduler.** `classes/eventScheduler.ts` is the only background timer — started after `login()`,
 stopped on shutdown. It posts event reminders and is **off** for any guild that hasn't set
-`event_reminder_channels`.
+`event_reminder_channels`. The same tick also delivers the per-user `/event remindme` DMs (a
+separate per-member opt-in needing no guild config) and drains the `EventNotice` queue that
+`/event edit` and `/event delete` fill when an event moves or is cancelled.
 
 **Shared code:** `utils/ai.ts` is the core (provider clients, personas, `generateContent`, tools);
 `utils/tokenizer.ts` (context trimming), `utils/aiPricing.ts` + `utils/discordRateLimit.ts` (credits),
 `utils/llmRetry.ts` (retry policy), `utils/mcp.ts` (web-search MCP client), `utils/imageGen.ts` +
 `utils/musicGen.ts` + `utils/diagramGen.ts` + `utils/aiMedia.ts` (media tools),
 `utils/pdf.ts` (PDF extraction), `utils/clubInfo.ts` (club data tools),
+`utils/eventReminders.ts` (DM reminder lead times), `utils/embedColour.ts` (announce colours),
 `utils/welcomeCard.ts` (join welcome card).
 
 ## Security & performance guardrails

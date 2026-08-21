@@ -3,6 +3,8 @@ import {
 } from 'bun:test';
 import { EventScheduler } from '../../classes/eventScheduler';
 import type { EventEntry, ReminderKind } from '../../database/models/EventModel';
+import type { DueEventReminder } from '../../database/models/EventReminderModel';
+import type { EventNoticeEntry } from '../../database/models/EventNoticeModel';
 
 const NOW = new Date('2026-09-01T00:00:00.000Z');
 /** Real Discord channel ids are 17-20 digit snowflakes — parseSnowflakeIds validates that. */
@@ -30,9 +32,50 @@ function makeEvent(overrides: Partial<EventEntry> = {}): EventEntry {
   };
 }
 
+function makeReminder(overrides: Partial<DueEventReminder> = {}): DueEventReminder {
+  return {
+    id: 1,
+    eventId: 1,
+    serverId: 'g1',
+    userId: 'u1',
+    lead: 'day',
+    dueAt: NOW.toISOString(),
+    sentAt: null,
+    createdAt: '',
+    eventName: 'Workshop',
+    eventStartsAt: new Date(NOW.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+    ...overrides,
+  };
+}
+
+function makeNotice(overrides: Partial<EventNoticeEntry> = {}): EventNoticeEntry {
+  return {
+    id: 1,
+    eventId: 1,
+    serverId: 'g1',
+    target: 'dm',
+    userId: 'u1',
+    kind: 'changed',
+    eventName: 'Workshop',
+    oldStartsAt: NOW.toISOString(),
+    newStartsAt: new Date(NOW.getTime() + 48 * 60 * 60 * 1000).toISOString(),
+    oldEndsAt: null,
+    newEndsAt: null,
+    oldLocation: null,
+    newLocation: null,
+    droppedLeads: null,
+    createdAt: NOW.toISOString(),
+    sentAt: null,
+    ...overrides,
+  };
+}
+
 interface Harness {
   client: any;
   sent: { channelId: string; embedTitle: string; image: string | null }[];
+  dms: { userId: string; embedTitle: string; description: string }[];
+  dmClaims: number[];
+  noticeClaims: number[];
   claims: { kind: ReminderKind; id: number }[];
   releases: { kind: ReminderKind; id: number }[];
   bands: { kind: ReminderKind; fromMs: number; toMs: number; configKey: string }[];
@@ -44,8 +87,15 @@ function harness(opts: {
   reminderChannels?: string;
   claimResult?: boolean;
   attachmentUrl?: string;
+  dueReminders?: DueEventReminder[];
+  dmClaimResult?: boolean;
+  dmError?: any;
+  dueNotices?: EventNoticeEntry[];
 } = {}): Harness {
   const sent: Harness['sent'] = [];
+  const dms: Harness['dms'] = [];
+  const dmClaims: number[] = [];
+  const noticeClaims: number[] = [];
   const claims: Harness['claims'] = [];
   const releases: Harness['releases'] = [];
   const bands: Harness['bands'] = [];
@@ -81,6 +131,32 @@ function harness(opts: {
         clearImage: async () => true,
         clearImageIfMatches: async () => true,
       },
+      eventNotice: {
+        listDue: async () => opts.dueNotices ?? [],
+        claim: async (id: number) => {
+          noticeClaims.push(id);
+          return true;
+        },
+      },
+      eventReminder: {
+        listDue: async () => opts.dueReminders ?? [],
+        claim: async (id: number) => {
+          dmClaims.push(id);
+          return opts.dmClaimResult ?? true;
+        },
+      },
+    },
+    users: {
+      fetch: async (userId: string) => ({
+        send: async ({ embeds }: any) => {
+          if (opts.dmError) throw opts.dmError;
+          dms.push({
+            userId,
+            embedTitle: embeds[0].data.title,
+            description: embeds[0].data.description ?? '',
+          });
+        },
+      }),
     },
     channels: {
       fetch: async (channelId: string) => ({
@@ -102,7 +178,7 @@ function harness(opts: {
   };
 
   return {
-    client, sent, claims, releases, bands, configRows,
+    client, sent, dms, dmClaims, noticeClaims, claims, releases, bands, configRows,
   };
 }
 
@@ -240,5 +316,117 @@ describe('EventScheduler', () => {
     const scheduler = new EventScheduler(h.client);
     scheduler.stop();
     scheduler.stop();
+  });
+});
+
+describe('EventScheduler DM reminders', () => {
+  test('claims and DMs a due subscription', async () => {
+    const hh = harness({ dueReminders: [makeReminder()] });
+    await new EventScheduler(hh.client).tick(NOW);
+    expect(hh.dmClaims).toEqual([1]);
+    expect(hh.dms).toHaveLength(1);
+    expect(hh.dms[0].userId).toBe('u1');
+    expect(hh.dms[0].embedTitle).toBe('Reminder — Workshop');
+  });
+
+  test('a lost claim means another tick already sent it — no DM', async () => {
+    const hh = harness({ dueReminders: [makeReminder()], dmClaimResult: false });
+    await new EventScheduler(hh.client).tick(NOW);
+    expect(hh.dms).toEqual([]);
+  });
+
+  test('a reminder that came due long ago is consumed, not sent', async () => {
+    // Bot was down for a day: telling someone about a lead time that passed
+    // yesterday is worse than saying nothing, but the row must not linger.
+    const stale = makeReminder({ dueAt: new Date(NOW.getTime() - 12 * 60 * 60 * 1000).toISOString() });
+    const hh = harness({ dueReminders: [stale] });
+    await new EventScheduler(hh.client).tick(NOW);
+    expect(hh.dmClaims).toEqual([1]);
+    expect(hh.dms).toEqual([]);
+  });
+
+  test('closed DMs keep the claim, so it is not retried every tick', async () => {
+    const hh = harness({ dueReminders: [makeReminder()], dmError: { code: 50007 } });
+    await new EventScheduler(hh.client).tick(NOW);
+    expect(hh.dmClaims).toEqual([1]);
+    expect(hh.dms).toEqual([]);
+  });
+
+  test('channel reminders still work when there are no due DMs', async () => {
+    const hh = harness({ events: { soon: [makeEvent()] }, reminderChannels: CH_A });
+    await new EventScheduler(hh.client).tick(NOW);
+    expect(hh.sent).toHaveLength(1);
+    expect(hh.dms).toEqual([]);
+  });
+});
+
+describe('EventScheduler change notices', () => {
+  test('DMs a subscriber that the event moved', async () => {
+    const hh = harness({ dueNotices: [makeNotice()] });
+    await new EventScheduler(hh.client).tick(NOW);
+    expect(hh.noticeClaims).toEqual([1]);
+    expect(hh.dms[0].embedTitle).toBe('Updated — Workshop');
+    expect(hh.dms[0].description).toContain('New time');
+  });
+
+  test('says only what actually changed', async () => {
+    // Start untouched (NULL both sides), location moved.
+    const hh = harness({
+      dueNotices: [makeNotice({
+        oldStartsAt: null, newStartsAt: null, oldLocation: 'CSSE', newLocation: 'Ezone',
+      })],
+    });
+    await new EventScheduler(hh.client).tick(NOW);
+    expect(hh.dms[0].description).toContain('Ezone');
+    expect(hh.dms[0].description).not.toContain('New time');
+  });
+
+  test('tells a subscriber when their lead was removed', async () => {
+    const hh = harness({ dueNotices: [makeNotice({ droppedLeads: 'morning' })] });
+    await new EventScheduler(hh.client).tick(NOW);
+    expect(hh.dms[0].description).toContain('doesn\'t work with the new time');
+    expect(hh.dms[0].description).toContain('/event remindme');
+  });
+
+  test('a cancellation reads as cancelled, not as a change', async () => {
+    const hh = harness({
+      dueNotices: [makeNotice({ kind: 'cancelled', newStartsAt: null })],
+    });
+    await new EventScheduler(hh.client).tick(NOW);
+    expect(hh.dms[0].embedTitle).toBe('Cancelled — Workshop');
+    expect(hh.dms[0].description).toContain('no longer happening');
+  });
+
+  test('a channel notice posts to every configured reminder channel', async () => {
+    const hh = harness({
+      dueNotices: [makeNotice({ target: 'channel', userId: '' })],
+      reminderChannels: `${CH_A},${CH_B}`,
+    });
+    await new EventScheduler(hh.client).tick(NOW);
+    expect(hh.sent.map((x) => x.channelId)).toEqual([CH_A, CH_B]);
+    expect(hh.dms).toEqual([]);
+  });
+
+  test('a channel notice in a guild with no reminder channels is dropped, not retried', async () => {
+    const hh = harness({ dueNotices: [makeNotice({ target: 'channel', userId: '' })] });
+    await new EventScheduler(hh.client).tick(NOW);
+    expect(hh.sent).toEqual([]);
+    // Claimed regardless: the guild opted out, so this row must not come back.
+    expect(hh.noticeClaims).toEqual([1]);
+  });
+
+  test('a notice queued days ago is consumed unsent', async () => {
+    const old = makeNotice({ createdAt: new Date(NOW.getTime() - 48 * 60 * 60 * 1000).toISOString() });
+    const hh = harness({ dueNotices: [old] });
+    await new EventScheduler(hh.client).tick(NOW);
+    expect(hh.noticeClaims).toEqual([1]);
+    expect(hh.dms).toEqual([]);
+  });
+
+  test('closed DMs do not stall the queue', async () => {
+    const hh = harness({ dueNotices: [makeNotice()], dmError: { code: 50007 } });
+    await new EventScheduler(hh.client).tick(NOW);
+    expect(hh.noticeClaims).toEqual([1]);
+    expect(hh.dms).toEqual([]);
   });
 });

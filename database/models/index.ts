@@ -4,6 +4,8 @@ import CommandConfigModel from './CommandConfigModel';
 import CommitteeModel from './CommitteeModel';
 import DiagramGenModel from './DiagramGenModel';
 import EventModel from './EventModel';
+import EventNoticeModel from './EventNoticeModel';
+import EventReminderModel from './EventReminderModel';
 import GlobalConfigModel from './GlobalConfigModel';
 import ImageGenModel from './ImageGenModel';
 import MusicGenModel from './MusicGenModel';
@@ -16,6 +18,8 @@ export {
   CommitteeModel,
   DiagramGenModel,
   EventModel,
+  EventNoticeModel,
+  EventReminderModel,
   GlobalConfigModel,
   ImageGenModel,
   MusicGenModel,

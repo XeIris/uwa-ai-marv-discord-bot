@@ -1,4 +1,7 @@
 import eventQueries from '../queries/eventQueries';
+import EventReminderModel from './EventReminderModel';
+import EventNoticeModel, { CHANNEL_RECIPIENT, fieldChange } from './EventNoticeModel';
+import type { FieldChange } from './EventNoticeModel';
 import type Database from '../Database';
 
 /** An event row as returned by the DB layer (snake_case columns are camelized). */
@@ -107,28 +110,123 @@ class EventModel {
     });
   }
 
-  /** Rewrites an event; fields left undefined keep their current value. */
+  /**
+   * Rewrites an event; fields left undefined keep their current value.
+   *
+   * A changed `starts_at` also recomputes every DM subscription's absolute
+   * `due_at` (see EventReminderModel.rescheduleWithin), in the same transaction:
+   * subscriptions store an instant, not an offset, so a reschedule that updated
+   * one without the other would fire reminders against the old time.
+   */
   async update(serverId: string, id: number, changes: EventInput): Promise<boolean> {
     const existing = await this.getById(serverId, id);
     if (!existing) return false;
 
     const pick = <T>(next: T | undefined, current: T): T => (next === undefined ? current : next);
-    const result = await this.db.executeQuery(eventQueries.UPDATE_EVENT, [
-      pick(changes.name, existing.name),
-      pick(changes.description, existing.description),
-      pick(changes.startsAt, existing.startsAt),
-      pick(changes.endsAt, existing.endsAt),
-      pick(changes.location, existing.location),
-      pick(changes.url, existing.url),
-      id,
-      serverId,
-    ]);
-    return result.changes > 0;
+    const name = pick(changes.name, existing.name);
+    const startsAt = pick(changes.startsAt, existing.startsAt);
+    const endsAt = pick(changes.endsAt, existing.endsAt);
+    const location = pick(changes.location, existing.location);
+    const startMoved = startsAt !== existing.startsAt;
+
+    const moved: FieldChange = fieldChange(existing.startsAt, startsAt);
+    const ends: FieldChange = fieldChange(existing.endsAt, endsAt);
+    const movedTo: FieldChange = fieldChange(existing.location, location);
+    const notifiable = moved.touched || ends.touched || movedTo.touched;
+
+    return this.db.executeTransaction((rawDb) => {
+      // Subscribers are read before the reschedule: it deletes the rows of anyone
+      // whose only lead stops resolving, and they still need to be told.
+      const subscriberIds = notifiable ? EventReminderModel.subscriberIdsWithin(rawDb, id) : [];
+
+      rawDb.query(eventQueries.UPDATE_EVENT).run(
+        name,
+        pick(changes.description, existing.description),
+        startsAt,
+        endsAt,
+        location,
+        pick(changes.url, existing.url),
+        id,
+        serverId,
+      );
+      const changed = (rawDb.query('SELECT changes() AS changes').get() as { changes: number }).changes > 0;
+      if (!changed) return false;
+
+      const dropped = startMoved ? EventReminderModel.rescheduleWithin(rawDb, id, startsAt) : [];
+      if (!notifiable) return true;
+
+      const recipients = new Set([...subscriberIds, ...dropped.map((entry) => entry.userId)]);
+      recipients.forEach((userId) => {
+        EventNoticeModel.queueWithin(rawDb, {
+          eventId: id,
+          serverId,
+          target: 'dm',
+          userId,
+          kind: 'changed',
+          eventName: name,
+          startsAt: moved,
+          endsAt: ends,
+          location: movedTo,
+          droppedLeads: dropped.filter((entry) => entry.userId === userId).map((entry) => entry.lead),
+        });
+      });
+
+      // One channel notice per event regardless of subscribers — members who
+      // never subscribed are exactly who the public post is for. The sweep drops
+      // it if the guild configured no reminder channels.
+      EventNoticeModel.queueWithin(rawDb, {
+        eventId: id,
+        serverId,
+        target: 'channel',
+        userId: CHANNEL_RECIPIENT,
+        kind: 'changed',
+        eventName: name,
+        startsAt: moved,
+        endsAt: ends,
+        location: movedTo,
+      });
+
+      return true;
+    });
   }
 
+  /**
+   * Deletes an event, queueing a cancellation notice first.
+   *
+   * Order matters: the subscriber list has to be read, and the notices written,
+   * before the DELETE cascades those subscriptions away. EventNotice carries no
+   * FK to Event and snapshots the name for the same reason — a cancellation
+   * notice has to outlive the row it's about.
+   */
   async delete(serverId: string, id: number): Promise<boolean> {
-    const result = await this.db.executeQuery(eventQueries.DELETE_EVENT, [id, serverId]);
-    return result.changes > 0;
+    const existing = await this.getById(serverId, id);
+    if (!existing) return false;
+
+    return this.db.executeTransaction((rawDb) => {
+      EventReminderModel.subscriberIdsWithin(rawDb, id).forEach((userId) => {
+        EventNoticeModel.queueWithin(rawDb, {
+          eventId: id,
+          serverId,
+          target: 'dm',
+          userId,
+          kind: 'cancelled',
+          eventName: existing.name,
+          startsAt: fieldChange(existing.startsAt, null),
+        });
+      });
+      EventNoticeModel.queueWithin(rawDb, {
+        eventId: id,
+        serverId,
+        target: 'channel',
+        userId: CHANNEL_RECIPIENT,
+        kind: 'cancelled',
+        eventName: existing.name,
+        startsAt: fieldChange(existing.startsAt, null),
+      });
+
+      rawDb.query(eventQueries.DELETE_EVENT).run(id, serverId);
+      return (rawDb.query('SELECT changes() AS changes').get() as { changes: number }).changes > 0;
+    });
   }
 
   async getById(serverId: string, id: number): Promise<EventEntry | null> {

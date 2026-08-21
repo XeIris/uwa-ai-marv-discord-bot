@@ -5,6 +5,8 @@ import aiUsageTable from './aiUsageTable';
 import commandConfigTable from './commandConfigTable';
 import committeeTable from './committeeTable';
 import diagramGenLogTable from './diagramGenLogTable';
+import eventNoticeTable from './eventNoticeTable';
+import eventReminderTable from './eventReminderTable';
 import eventTable from './eventTable';
 import globalConfigTable from './globalConfigTable';
 import imageGenLogTable from './imageGenLogTable';
@@ -19,6 +21,8 @@ export {
   commandConfigTable,
   committeeTable,
   diagramGenLogTable,
+  eventNoticeTable,
+  eventReminderTable,
   eventTable,
   globalConfigTable,
   imageGenLogTable,
