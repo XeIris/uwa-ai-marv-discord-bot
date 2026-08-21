@@ -145,9 +145,13 @@ function buildTinyPdf(text: string): Uint8Array {
 describe('unpdf contract the worker depends on', () => {
   test('extracts text from a real document', async () => {
     const doc = await getDocumentProxy(buildTinyPdf('Hello Marv'));
-    const { text } = await extractText(doc, { mergePages: true });
-    expect(text.trim()).toBe('Hello Marv');
-    await doc.loadingTask.destroy();
+    try {
+      const { text } = await extractText(doc, { mergePages: true });
+      expect(text.trim()).toBe('Hello Marv');
+    } finally {
+      // A failed assertion must not leak the pdf.js worker into the next test.
+      await doc.loadingTask.destroy();
+    }
   });
 
   test('teardown is reachable and actually tears down', async () => {

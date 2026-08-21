@@ -397,6 +397,9 @@ async function resolvePersona(messageContent = ''): Promise<Persona> {
     model: defaults.model || 'deepseek/deepseek-v4-flash-0731',
     systemPrompt: defaults.systemPrompt || 'You are a helpful AI assistant.',
     responseModalities: defaults.responseModalities || ['TEXT'],
+    // Carried through so a `reasoning` added to `defaults` isn't silently dropped
+    // for the one persona that has no entry of its own.
+    reasoning: defaults.reasoning,
   };
 }
 

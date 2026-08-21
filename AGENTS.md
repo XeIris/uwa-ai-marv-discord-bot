@@ -39,8 +39,10 @@ is required and pinned — see `.claude/rules/deploy.md` for the places the vers
 
 - `bun run dev` / `bun run start` — run `index.ts` (dev is `--watch`).
 - `bun test` — Bun test runner, `tests/` with the `tests/setup.ts` preload (30s default timeout),
-  Jest-like API. Runs `--parallel` (one worker process per file); `bun run test:isolate` gives each
-  file a fresh global if you suspect cross-file state.
+  Jest-like API. Runs `--parallel`, which spreads the files over one worker process per CPU core
+  and implies `--isolate` (each file gets a fresh global). `bun run test:isolate` is the
+  single-process equivalent — same isolation, no parallelism — for when parallel output is hard
+  to read or you're bisecting a flake.
 - `bun run lint` / `lint:fix` — ESLint 10, flat config in `eslint.config.mjs`
   (airbnb-extended + n + promise + typescript-eslint).
 - `bun run typecheck` — `tsc --noEmit`, on **TypeScript 7** (the Go compiler).

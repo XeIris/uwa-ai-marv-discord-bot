@@ -35,8 +35,21 @@ export function resetMemoryPressureState(): void {
  * Returns true if a sweep ran, false if the level was advisory or the cooldown was
  * still in effect.
  */
+/**
+ * The slice of the discord.js `Client` this module touches. Narrower than the real
+ * thing on purpose: it keeps the tests free to pass a stub, while still catching a
+ * typo or an upstream rename in the sweeper calls below.
+ */
+interface SweepableClient {
+  user?: { id: string } | null;
+  sweepers?: {
+    sweepMessages?: (filter: (message: unknown) => boolean) => number;
+    sweepUsers?: (filter: (user: { id: string }) => boolean) => number;
+  };
+}
+
 export function handleMemoryPressure(
-  client: any,
+  client: SweepableClient,
   level: 'warning' | 'critical',
   now: number = Date.now(),
 ): boolean {
@@ -55,7 +68,7 @@ export function handleMemoryPressure(
     // welcome card read them per request, so evicting them buys little and costs
     // a round trip on the next message.
     swept += client.sweepers?.sweepMessages?.(() => true) ?? 0;
-    swept += client.sweepers?.sweepUsers?.((user: any) => user.id !== client.user?.id) ?? 0;
+    swept += client.sweepers?.sweepUsers?.((user) => user.id !== client.user?.id) ?? 0;
   } catch (err) {
     logError('[mem] cache sweep under memory pressure failed', err);
   }
@@ -71,7 +84,7 @@ export function handleMemoryPressure(
 }
 
 /** Wires the handler up. Safe to call once at startup; a no-op on runtimes without the event. */
-export function registerMemoryPressureHandler(client: any): void {
+export function registerMemoryPressureHandler(client: SweepableClient): void {
   process.on('memoryPressure', (level) => {
     try {
       handleMemoryPressure(client, level);
