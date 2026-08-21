@@ -22,7 +22,8 @@
  */
 
 import satori from 'satori';
-import { Resvg, initWasm } from '@resvg/resvg-wasm';
+import { Resvg } from '@resvg/resvg-wasm';
+import { ensureResvgWasm } from './resvgWasm';
 import { log, logError } from './log';
 
 export const DIAGRAM_GUIDE_TOOL_NAME = 'get_diagram_guide';
@@ -725,23 +726,6 @@ async function getFonts(): Promise<LoadedFont[] | null> {
   }
 }
 
-let wasmReady: Promise<void> | null = null;
-
-function ensureWasm(): Promise<void> {
-  if (!wasmReady) {
-    wasmReady = (async () => {
-      const wasmPath = require.resolve('@resvg/resvg-wasm/index_bg.wasm');
-      await initWasm(await Bun.file(wasmPath).arrayBuffer());
-      log('[diagram] resvg wasm initialised');
-    })().catch((err) => {
-      // Let the next call retry — a failed init here is not necessarily permanent.
-      wasmReady = null;
-      throw err;
-    });
-  }
-  return wasmReady;
-}
-
 function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
     work,
@@ -888,7 +872,7 @@ export async function runDiagramGeneration(opts: {
 
     let png: Buffer;
     try {
-      await ensureWasm();
+      await ensureResvgWasm();
       const resvg = new Resvg(svgMarkup, {
         // Only our own fonts, never the host's — deterministic output, and the
         // renderer never touches the filesystem looking for font files.

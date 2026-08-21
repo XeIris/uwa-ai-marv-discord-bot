@@ -21,7 +21,8 @@
  */
 
 import satori from 'satori';
-import { Resvg, initWasm } from '@resvg/resvg-wasm';
+import { Resvg } from '@resvg/resvg-wasm';
+import { ensureResvgWasm } from './resvgWasm';
 import { log, logError } from './log';
 
 const ASSET_DIR = `${import.meta.dir}/../data`;
@@ -152,22 +153,6 @@ async function loadAssets(): Promise<LoadedAssets | null> {
 export function resetWelcomeCardCache(): void {
   cachedAssets = null;
   assetLoadFailed = false;
-}
-
-let wasmReady: Promise<void> | null = null;
-
-function ensureWasm(): Promise<void> {
-  if (!wasmReady) {
-    wasmReady = (async () => {
-      const wasmPath = require.resolve('@resvg/resvg-wasm/index_bg.wasm');
-      await initWasm(await Bun.file(wasmPath).arrayBuffer());
-    })().catch((err) => {
-      // A failed init here isn't necessarily permanent — let the next call retry.
-      wasmReady = null;
-      throw err;
-    });
-  }
-  return wasmReady;
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +343,7 @@ export async function renderWelcomeCard(input: WelcomeCardInput): Promise<Buffer
   if (!assets) return null;
 
   try {
-    await ensureWasm();
+    await ensureResvgWasm();
   } catch (err) {
     logError('[welcome] resvg wasm init failed:', err);
     return null;
