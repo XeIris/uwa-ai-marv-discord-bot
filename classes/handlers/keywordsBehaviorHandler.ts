@@ -8,7 +8,9 @@ import {
   generateContent,
   generateTitleForHistory,
   getPersonaMediaKinds,
+  resolveTurnModel,
 } from '../../utils/ai';
+import { ensureAiConsent } from '../../utils/aiConsent';
 import { getRateLimitErrorMessage } from '../../utils/discordRateLimit';
 import { IMAGE_GEN_TOOL_NAME, IMAGE_EDIT_MAX_SOURCES } from '../../utils/imageGen';
 import { MUSIC_GEN_TOOL_NAME, MUSIC_GUIDE_TOOL_NAME } from '../../utils/musicGen';
@@ -29,6 +31,17 @@ const scriptHandlers = {
     const username = message.author?.username
       ? message.author.username.toLowerCase()
       : 'user';
+
+    // One-time data notice, before anything is read, stored, or sent onward —
+    // that ordering is the point, so a declining user's attachments are never
+    // even downloaded. Steady state is a cached Map lookup (AiConsentModel).
+    const consented = await ensureAiConsent(
+      (message.client as any).db,
+      message.author.id,
+      (payload) => message.reply({ ...payload, allowedMentions: { repliedUser: false } }),
+    );
+    if (!consented) return;
+
     // `-n` requests a fresh session and is stripped before the model sees it.
     const { requested: shouldStartNewSession, text: query } = parseNewSessionFlag(message.content || '');
 
@@ -180,6 +193,9 @@ const scriptHandlers = {
     let historyLoaded = false;
     let hadRawHistory = false;
     let contextWarnings: { level: number; message: string; wasTrimmed: boolean; trimmedCount: number }[] = [];
+    // Kept so the text-only fallback below can re-trim from the untrimmed set
+    // rather than from a window budgeted for a different model.
+    let filteredHistory: any[] = [];
     if (hasMemory) {
       try {
         aiSession = await (message.client as any).db.aiChat.getOrCreateSession(
@@ -191,12 +207,18 @@ const scriptHandlers = {
 
         // Tool rows are audit-only and get filtered out before replay anyway —
         // exclude them from the token budget so they don't crowd out real turns.
-        const filteredHistory = rawHistory.filter((h: { role: string }) => h.role !== 'tool');
+        filteredHistory = rawHistory.filter((h: { role: string }) => h.role !== 'tool');
 
-        // Token-based sliding window: trim oldest messages to fit context
+        // Token-based sliding window: trim oldest messages to fit context.
+        // Budgeted against the model this turn will actually run on — a dual-
+        // routed persona's two models can have different context windows, and
+        // the text model's can be the smaller of the two (Marv: 262k on
+        // DeepSeek against 1.05M on the vision route). A vision turn that falls
+        // back to text-only therefore re-trims against the text budget before
+        // retrying; see the catch below.
         const { trimmedHistory, warnings } = await trimHistoryToFit(
           persona.provider,
-          persona.model,
+          resolveTurnModel(persona, mediaParts.length > 0).model,
           persona.systemPrompt ?? '',
           filteredHistory,
           prompt,
@@ -218,17 +240,20 @@ const scriptHandlers = {
       const webhooks = await (message.channel as TextChannel).fetchWebhooks();
       let webhook = webhooks.find((wh: any) => wh.name === WEBHOOK_NAME && wh.token);
 
+      // Dual routing: attachments the chat model must see force the persona's
+      // vision model, everything else takes the cheap default. `withMedia` is
+      // the whole input — the text-only retry below therefore also drops back to
+      // the text model instead of paying vision prices for a text turn.
       const generateOnce = (withMedia: boolean) => generateContent({
         db: (message.client as any).db,
         userId: message.author.id,
         provider: persona.provider,
-        model: persona.model,
+        ...resolveTurnModel(persona, withMedia),
         systemPrompt: persona.systemPrompt ?? '',
         prompt,
         history,
         webSearchEnabled: persona.webSearchEnabled,
         mediaParts: withMedia ? mediaParts : [],
-        providerRouting: persona.providerRouting,
         // Image generation is Discord-only (delivery rides this webhook); the
         // rate limit is keyed to the requesting Discord user. Attached images
         // ride along as edit sources for the generate_image tool. The
@@ -270,6 +295,25 @@ const scriptHandlers = {
         if (mediaParts.length === 0) throw genErr;
         logError('AiChat: generation with media failed, retrying text-only:', genErr);
         mediaDropped = true;
+        // The history above was trimmed to the vision model's window. Retrying
+        // on a text model with a smaller one would resend an oversized request
+        // and fail the fallback too, so re-trim before the retry.
+        if (historyLoaded) {
+          try {
+            const retryTrim = await trimHistoryToFit(
+              persona.provider,
+              resolveTurnModel(persona, false).model,
+              persona.systemPrompt ?? '',
+              filteredHistory,
+              prompt,
+              persona.webSearchEnabled,
+            );
+            history = retryTrim.trimmedHistory;
+            contextWarnings = retryTrim.warnings;
+          } catch (trimErr) {
+            logError('AiChat: failed to re-trim history for the text-only retry:', trimErr);
+          }
+        }
         genResult = await generateOnce(false);
       } finally {
         // Buffers are only referenced by these arrays; free the slot as soon

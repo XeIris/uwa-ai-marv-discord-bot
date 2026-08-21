@@ -94,12 +94,110 @@ export async function resolveAndPrune(client: any, db: any, event: EventEntry): 
   return url;
 }
 
-export const IMAGE_KEEP_WARNING = '⚠ **Don\'t delete this message** — the event\'s image is stored by pointing at it. '
-  + 'If this message goes, the image goes with it (the event itself stays).';
-
 /** Discord's own attachment content types we accept as an event image. */
 const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+/** Filename extension per accepted type — Discord renders by extension, not header. */
+const EXTENSION_BY_TYPE: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+};
+
+/**
+ * Downloads an event's image as raw bytes, ready to attach to a new message.
+ *
+ * `resolveAndPrune` hands back a *signed* CDN URL that expires in about a day —
+ * fine for a reminder that is read within the hour, wrong for an announcement
+ * that stays in the channel as the event's permanent notice. Re-uploading the
+ * bytes onto the announcement itself gives it an attachment of its own, which
+ * never goes stale and survives the original confirmation message being deleted.
+ *
+ * Returns null when the event has no image or it couldn't be fetched; callers
+ * post without it rather than failing.
+ */
+/** How long the CDN has to hand over an event image before we give up on it. */
+const DOWNLOAD_TIMEOUT_MS = 10_000;
+
+/**
+ * Reads a response body, stopping the moment it goes over `limit`.
+ *
+ * Returns null when the cap is exceeded, so an oversized body is abandoned
+ * mid-stream instead of being buffered in full and measured afterwards.
+ */
+async function readCapped(response: Response, limit: number): Promise<Buffer | null> {
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      // eslint-disable-next-line no-await-in-loop
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks);
+}
+
+export async function fetchEventImageFile(
+  client: any,
+  db: any,
+  event: EventEntry,
+): Promise<{ attachment: Buffer; name: string } | null> {
+  const url = await resolveAndPrune(client, db, event).catch(() => null);
+  if (!url) return null;
+
+  try {
+    // Bounded on all three axes, because this is a network read and none of the
+    // far end's claims are load-bearing: a stalled connection can't hang the
+    // announcement, a lying Content-Length can't get past the streamed cap, and
+    // an absent one can't buy an unbounded arrayBuffer() allocation.
+    const response = await fetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+    if (!response.ok) {
+      logError(`[eventimage] image download for event ${event.id} returned HTTP ${response.status}`);
+      return null;
+    }
+
+    const contentType = String(response.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+    const extension = EXTENSION_BY_TYPE[contentType];
+    if (!extension) {
+      // Guessing .png for an unknown type just mislabels the attachment. The
+      // upload path already whitelists these, so anything else is a surprise.
+      logError(`[eventimage] image for event ${event.id} is \`${contentType || 'unknown'}\` — not a supported type, skipping`);
+      return null;
+    }
+
+    const declared = Number(response.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > MAX_IMAGE_BYTES) {
+      logError(`[eventimage] image for event ${event.id} declares ${declared} bytes — over the limit, skipping`);
+      return null;
+    }
+
+    const bytes = await readCapped(response, MAX_IMAGE_BYTES);
+    if (!bytes) {
+      logError(`[eventimage] image for event ${event.id} exceeded ${MAX_IMAGE_BYTES} bytes while streaming, skipping`);
+      return null;
+    }
+    return { attachment: bytes, name: `event-${event.id}.${extension}` };
+  } catch (err) {
+    logError(`[eventimage] failed to download image for event ${event.id}:`, err);
+    return null;
+  }
+}
+
+export const IMAGE_KEEP_WARNING = '⚠ **Don\'t delete this message** — the event\'s image is stored by pointing at it. '
+  + 'If this message goes, the image goes with it (the event itself stays).';
 
 /** Validates an uploaded attachment before we re-post it. Returns an error string, or null. */
 export function validateImageAttachment(attachment: any): string | null {

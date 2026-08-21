@@ -9,14 +9,19 @@ import aiUsageQueries from './queries/aiUsageQueries';
 import committeeQueries from './queries/committeeQueries';
 import diagramGenQueries from './queries/diagramGenQueries';
 import eventQueries from './queries/eventQueries';
+import eventNoticeQueries from './queries/eventNoticeQueries';
+import eventReminderQueries from './queries/eventReminderQueries';
 import * as modelClasses from './models';
 import type { TableDefinition, QueryResult } from './types';
 import type AiChatModel from './models/AiChatModel';
+import type AiConsentModel from './models/AiConsentModel';
 import type AiUsageModel from './models/AiUsageModel';
 import type CommandConfigModel from './models/CommandConfigModel';
 import type CommitteeModel from './models/CommitteeModel';
 import type DiagramGenModel from './models/DiagramGenModel';
 import type EventModel from './models/EventModel';
+import type EventNoticeModel from './models/EventNoticeModel';
+import type EventReminderModel from './models/EventReminderModel';
 import type GlobalConfigModel from './models/GlobalConfigModel';
 import type ImageGenModel from './models/ImageGenModel';
 import type MusicGenModel from './models/MusicGenModel';
@@ -213,6 +218,11 @@ class Database {
     // Club data: roster ordering and the upcoming-events lookup.
     this.db.run(committeeQueries.CREATE_SERVER_ORDER_INDEX);
     this.db.run(eventQueries.CREATE_SERVER_STARTS_INDEX);
+    // Per-user DM reminder subscriptions: the sweep's due scan and the per-user list.
+    this.db.run(eventReminderQueries.CREATE_DUE_INDEX);
+    this.db.run(eventReminderQueries.CREATE_USER_INDEX);
+    // Queued change/cancellation notices awaiting delivery.
+    this.db.run(eventNoticeQueries.CREATE_DUE_INDEX);
 
     // Migrate legacy ServerRoles into ServerConfig when opening an older database.
     this.migrateLegacyServerRolesIfNeeded();
@@ -368,10 +378,13 @@ class Database {
   async dumpGlobalConfig(): Promise<string> { return this.dumpTable('GlobalConfig', []); }
 
   get aiChat(): AiChatModel { return this.models.AiChatModel; }
+  get aiConsent(): AiConsentModel { return this.models.AiConsentModel; }
   get aiUsage(): AiUsageModel { return this.models.AiUsageModel; }
   get commandConfig(): CommandConfigModel { return this.models.CommandConfigModel; }
   get committee(): CommitteeModel { return this.models.CommitteeModel; }
   get event(): EventModel { return this.models.EventModel; }
+  get eventReminder(): EventReminderModel { return this.models.EventReminderModel; }
+  get eventNotice(): EventNoticeModel { return this.models.EventNoticeModel; }
   get globalConfig(): GlobalConfigModel { return this.models.GlobalConfigModel; }
   get imageGen(): ImageGenModel { return this.models.ImageGenModel; }
   get musicGen(): MusicGenModel { return this.models.MusicGenModel; }

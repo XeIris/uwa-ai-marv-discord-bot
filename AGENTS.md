@@ -8,7 +8,7 @@ Not a GitHub fork and no shared commit history (squashed import), so upstream ch
 `git cherry-pick` from the `upstream` remote, never by merge. Upstream is **unlicensed** — don't
 copy its code into anything else without asking its authors first.
 
-**Last updated: 2026-08-15**
+**Last updated: 2026-08-21**
 
 > **Maintenance rule.** Edit agent docs only on *substantive architectural* change — new
 > architecture, new auth, new data flows/services, schema or security-model changes, or when
@@ -26,7 +26,7 @@ duplicate their content here.
 | Working on | Loads |
 | ------ | ------ |
 | `database/**` | `.claude/rules/database.md` — DAO layering, transactions, settings tables |
-| `utils/ai.ts`, `utils/aiPricing.ts`, `utils/llmRetry.ts`, `commands/ai*.ts`, `AiUsageModel` | `.claude/rules/ai-limits.md` — credit metering, retry policy |
+| `utils/ai.ts`, `utils/aiPricing.ts`, `utils/llmRetry.ts`, `utils/aiConsent.ts`, `commands/ai*.ts`, `AiUsageModel` | `.claude/rules/ai-limits.md` — credit metering, model routing, consent gate, retry policy |
 | `commands/committee_*`, `commands/event_*`, `utils/clubInfo.ts`, the club models | `.claude/rules/club-data.md` — roster, events, constitution |
 | `utils/diagramGen.ts`, `data/skills/diagram-guide.md`, `scripts/fetch-fonts.ts` | `.claude/rules/diagrams.md` — render_diagram, markup allowlists |
 | `utils/welcomeCard.ts`, `classes/handlers/welcomeHandler.ts`, `commands/dev_welcome_test.ts` | `.claude/rules/welcome.md` — join welcome card |
@@ -55,7 +55,7 @@ in the DB `GlobalConfig` table and override/augment env.
 
 **AI features:** keyword-triggered AI chat (say `marv`/`@grok`/`@ds`/etc. → webhook replies via
 `classes/handlers/keywordsBehaviorHandler.ts` → `utils/ai.ts`), per-user chat sessions
-(`/ai view|chatnew|chatswitch|chatdelete|retitle`, `AiChatModel`), credit metering (`/ai usage`,
+(`/ai view|chatnew|chatswitch|chatdelete|retitle|forget`, `AiChatModel`), credit metering (`/ai usage`,
 `AiUsageModel`), AI chat summaries (`/summary count|time`), and the web-search / image-generation /
 music-generation (JAYDON) / diagram-rendering tools that ride along in chat. Personas live in
 `data/aiPersonas.json`.
@@ -64,7 +64,8 @@ music-generation (JAYDON) / diagram-rendering tools that ride along in chat. Per
 persona with `clubTools: true`, which grants read-only tools backed by our own data: the committee
 roster (`/committee`), the events calendar (`/event`), the club constitution, four hand-maintained
 reference sheets (official links — also `/links`, UWA key dates, student perks, club FAQ), and UWA
-handbook unit lookup. Marv also answers to his bare name (`marv`, no `@`), matched on word
+handbook unit lookup. Marv is **dual-routed** — image turns take a different model from text turns;
+the models and the routing rationale live in `.claude/rules/ai-limits.md`. Marv also answers to his bare name (`marv`, no `@`), matched on word
 boundaries so "marvel" doesn't summon him. Every user prompt is also tagged
 `[date]-[committee title]-[username]-` so any persona knows who it's talking to. See
 `.claude/rules/club-data.md`.
@@ -78,7 +79,8 @@ a single entry (the AI triggers). Don't resurrect these without saying so.
 artwork with their avatar composited in — posted to `welcome_channels`. Opt-in only; unset means
 silent. See `.claude/rules/welcome.md`.
 
-**Public commands:** `/links` (static club links, no AI credits), `/committee list`, `/event list`.
+**Public commands:** `/links` (static club links, no AI credits), `/committee list`, `/event list`,
+`/event remindme` (per-member DM reminders before an event).
 
 **Dev/admin commands kept** (generic, not tied to stripped features): `/eval`, `/execute`,
 `/ping dev`, `/dev ramstats`, `/dev welcome_test`, `/dbdump`, `/logdump`, `/serverconfig get|setchannel|
@@ -112,13 +114,17 @@ sets `welcome_channels`); message delete/edit tracked for history.
 
 **Scheduler.** `classes/eventScheduler.ts` is the only background timer — started after `login()`,
 stopped on shutdown. It posts event reminders and is **off** for any guild that hasn't set
-`event_reminder_channels`.
+`event_reminder_channels`. The same tick also delivers the per-user `/event remindme` DMs (a
+separate per-member opt-in needing no guild config) and drains the `EventNotice` queue that
+`/event edit` and `/event delete` fill when an event moves or is cancelled.
 
 **Shared code:** `utils/ai.ts` is the core (provider clients, personas, `generateContent`, tools);
 `utils/tokenizer.ts` (context trimming), `utils/aiPricing.ts` + `utils/discordRateLimit.ts` (credits),
 `utils/llmRetry.ts` (retry policy), `utils/mcp.ts` (web-search MCP client), `utils/imageGen.ts` +
 `utils/musicGen.ts` + `utils/diagramGen.ts` + `utils/aiMedia.ts` (media tools),
 `utils/pdf.ts` (PDF extraction), `utils/clubInfo.ts` (club data tools),
+`utils/aiConsent.ts` (one-time data-notice gate),
+`utils/eventReminders.ts` (DM reminder lead times), `utils/embedColour.ts` (announce colours),
 `utils/welcomeCard.ts` (join welcome card).
 
 ## Security & performance guardrails
@@ -129,6 +135,9 @@ stopped on shutdown. It posts event reminders and is **off** for any guild that 
 - **Never write raw SQL outside `database/queries/`.** Queries use `?` placeholders only.
 - **Logging:** use `log()` / `logError()` (`utils/log.ts`) → `persistence/`. **Never log secrets.**
 - **No dev bypass of AI metering** — everyone pays credits, devs included.
+- **No AI generation without consent.** Every entry point that sends member text to a provider
+  calls `ensureAiConsent` (`utils/aiConsent.ts`) first and stops silently if it returns false —
+  it fails closed. New AI entry points must be gated too.
 
 ## Gotchas
 

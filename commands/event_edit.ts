@@ -93,15 +93,39 @@ class EventEdit extends AdminCommand {
       return;
     }
 
-    const fresh = await this.client.db.event.getById(interaction.guild.id, id);
+    // The update succeeded; the re-fetch is only for the confirmation text. If
+    // the event was deleted in the gap, fall back to the pre-update row rather
+    // than throwing and reporting a failure for an edit that went through.
+    const fresh = (await this.client.db.event.getById(interaction.guild.id, id)) ?? existing;
+    const lines = [
+      `${discordTimestamp(fresh.startsAt)} (${discordTimestamp(fresh.startsAt, 'R')})`,
+      `id \`${id}\``,
+    ];
+
+    const notified = await this.pendingNoticeCount(id);
+    if (notified > 0) {
+      lines.push('', `I'll DM ${notified} subscriber${notified === 1 ? '' : 's'} about the change `
+        + 'and post it to the reminder channels.');
+    }
+
     await interaction.editReply({
       embeds: [
         new EmbedBuilder()
           .setTitle(`Event updated — ${fresh.name}`)
-          .setDescription(`${discordTimestamp(fresh.startsAt)} (${discordTimestamp(fresh.startsAt, 'R')})\nid \`${id}\``)
+          .setDescription(lines.join('\n'))
           .setColor('#00AA00'),
       ],
     });
+  }
+
+  /**
+   * Subscribers queued to hear about this edit. Read after the update, since
+   * queueing happens inside its transaction — and it collapses, so this is the
+   * count of people to be told, not of edits made.
+   */
+  private async pendingNoticeCount(eventId: number): Promise<number> {
+    const notices = await this.client.db.eventNotice.listForEvent(eventId);
+    return notices.filter((notice: any) => notice.target === 'dm' && notice.sentAt === null).length;
   }
 }
 

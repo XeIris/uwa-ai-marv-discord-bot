@@ -3,6 +3,7 @@ import { Command } from './classes/Command';
 import { generateContent, getPersonaByName } from '../utils/ai';
 import { log, logError } from '../utils/log';
 import { handleRateLimitError } from '../utils/discordRateLimit';
+import { ensureAiConsent } from '../utils/aiConsent';
 import { fetchMessagesByTime } from '../utils/fetch';
 
 function splitForEmbed(text: string, max = 4096): string[] {
@@ -52,6 +53,15 @@ class Summary extends Command {
       await interaction.editReply('Invalid time range. Maximum is 72 hours.');
       return;
     }
+
+    // Same one-time data notice as the mention path — /summary ships other
+    // people's messages to a provider, so it must not run un-acknowledged.
+    const consented = await ensureAiConsent(
+      this.client.db,
+      interaction.user.id,
+      (payload: any) => interaction.editReply(payload),
+    );
+    if (!consented) return;
 
     const messages = await fetchMessagesByTime(interaction.channel, timeLimit.getTime(), 3000);
     log(`Fetched ${messages.length} messages`);
