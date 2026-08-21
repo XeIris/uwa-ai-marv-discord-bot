@@ -88,7 +88,6 @@ export async function handleGuildMemberAdd(client: any, member: any): Promise<vo
     let delivered = 0;
     for (const channelId of config.welcomeChannelIds) {
       try {
-        // eslint-disable-next-line no-await-in-loop
         const channel = await client.channels.fetch(channelId);
         if (!channel?.isTextBased?.()) {
           log(`[welcome] channel ${channelId} in guild ${guildId} is not text-based; skipping`);
@@ -103,7 +102,7 @@ export async function handleGuildMemberAdd(client: any, member: any): Promise<vo
         }
         // Rebuilt per channel: an AttachmentBuilder wraps a stream that discord.js
         // consumes on send, so re-sending the same instance uploads nothing.
-        // eslint-disable-next-line no-await-in-loop
+
         await channel.send({
           content: payload.content,
           embeds: payload.embeds,

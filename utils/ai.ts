@@ -4,6 +4,10 @@ import mime from 'mime';
 import type Database from '../database/Database';
 import { logError, logWarning } from './log';
 import { recordUsage, getCalibrationMultiplier } from './tokenCalibration';
+// Pre-existing cycle: tokenizer imports formatting helpers and the Gemini
+// client back out of this module. Newly visible now that the resolver
+// understands TS; untangling it is a refactor, not a lint fix.
+// eslint-disable-next-line import-x/no-cycle
 import { countTokensOpenRouterMessages } from './tokenizer';
 import { listSearchTools, listSearchToolsGemini, callSearchTool } from './mcp';
 import { creditsForTokens, isFreeModel, ESTIMATED_COMPLETION_TOKENS } from './aiPricing';
@@ -65,6 +69,9 @@ import {
   buildUnitNote,
   runUnitLookup,
 } from './unitLookup';
+
+// Load personas configuration
+import personasData from '../data/aiPersonas.json';
 // Note: Bun automatically reads .env files
 
 // Initialize AI providers
@@ -81,10 +88,6 @@ const openrouter = new OpenAI({
     'X-Title': 'Silverwolf',
   },
 });
-
-// Load personas configuration
-// eslint-disable-next-line import/first
-import personasData from '../data/aiPersonas.json';
 
 const personasConfig: any = (personasData as any).personasConfig || personasData;
 
@@ -179,7 +182,7 @@ export function resolveTurnModel(persona: Persona, hasReadableMedia: boolean): T
 export function getPersonaMediaKinds(persona: Persona): MediaKind[] {
   if (persona.provider !== 'openrouter' || !persona.mediaInput) return [];
   if (persona.mediaInput === true) return [...ALL_MEDIA_KINDS];
-  return persona.mediaInput.filter((k): k is MediaKind => ALL_MEDIA_KINDS.includes(k as MediaKind));
+  return persona.mediaInput.filter((k): k is MediaKind => ALL_MEDIA_KINDS.includes(k));
 }
 
 export interface ToolCallRecord {
@@ -567,7 +570,7 @@ ${systemPrompt || ''}
       try {
         // Music composing turns emit a large composition JSON under a raised
         // max_tokens cap — give them a longer per-attempt timeout.
-        // eslint-disable-next-line no-await-in-loop
+
         completion = await createChatCompletionWithRetry(openrouter, requestBody, {
           timeoutMs: musicGuideRead ? 480_000 : undefined,
         });
@@ -580,7 +583,7 @@ ${systemPrompt || ''}
           logWarning(`[ai] model ${model} rejected tools; retrying without`);
           toolsAvailable = false;
           iter -= 1;
-          // eslint-disable-next-line no-continue
+
           continue;
         }
         throw err;
@@ -629,7 +632,7 @@ ${systemPrompt || ''}
         // written without the guide in context).
         const guideReadAtBatchStart = musicGuideRead;
         const diagramGuideReadAtBatchStart = diagramGuideRead;
-        // eslint-disable-next-line no-await-in-loop
+
         const results = await Promise.all(reqToolCalls.map(async (tc: any) => {
           const callName = tc.function?.name ?? '';
           let parsedArgs: Record<string, any> = {};
@@ -754,7 +757,7 @@ ${systemPrompt || ''}
           if (r.callName === MUSIC_GUIDE_TOOL_NAME && r.ok) musicGuideRead = true;
           if (r.callName === DIAGRAM_GUIDE_TOOL_NAME && r.ok) diagramGuideRead = true;
         }
-        // eslint-disable-next-line no-continue
+
         continue;
       }
 
@@ -893,7 +896,7 @@ ${systemPrompt || ''}
 
         const guideReadAtBatchStart = musicGuideRead;
         const diagramGuideReadAtBatchStart = diagramGuideRead;
-        // eslint-disable-next-line no-await-in-loop
+
         const fnResponses = await Promise.all(fnCalls.map(async (fc: any) => {
           const args = (fc.args ?? {}) as Record<string, any>;
           if (musicGen && fc.name === MUSIC_GUIDE_TOOL_NAME) {
@@ -1028,7 +1031,6 @@ ${systemPrompt || ''}
           diagramGuideRead = true;
         }
 
-        // eslint-disable-next-line no-await-in-loop
         response = await chatSession.sendMessage({ message: fnResponses });
       }
 
@@ -1069,13 +1071,14 @@ ${systemPrompt || ''}
     // generateContentStream now resolves to the async iterable directly, rather
     // than to a { stream, response } pair.
     let streamUsage: any = null;
-    // eslint-disable-next-line no-restricted-syntax
+
     for await (const chunk of resultObject) {
       // There is no aggregated final response to read usage from any more, so
       // keep the last chunk that carried it — Gemini reports cumulative totals.
       if (chunk.usageMetadata) streamUsage = chunk.usageMetadata;
       if (chunk.candidates?.[0]?.content?.parts) {
-        // eslint-disable-next-line no-loop-func
+        // fileIndex is mutated per part, but forEach runs synchronously here.
+        // eslint-disable-next-line @typescript-eslint/no-loop-func
         chunk.candidates[0].content.parts.forEach((part: any) => {
           if (part.inlineData) {
             const { inlineData } = part;

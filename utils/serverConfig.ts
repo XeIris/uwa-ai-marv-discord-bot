@@ -132,11 +132,11 @@ export interface ResolvedServerConfig {
   messageReactsEnabled: boolean;
 }
 
-type ServerConfigReader = {
+interface ServerConfigReader {
   serverConfig: {
     getAllServerConfig: (serverId: string) => Promise<Record<string, any>[]>;
   };
-};
+}
 
 function parseRate(raw: string | null | undefined, defaultValue: number): number {
   if (raw === null || raw === undefined || raw === '') return defaultValue;

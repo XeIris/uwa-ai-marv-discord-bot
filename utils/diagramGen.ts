@@ -321,9 +321,9 @@ const CSS_PROPS = new Set([
 const DISPLAY_VALUES = new Set(['flex', 'none', 'block']);
 const FONT_FAMILIES = new Set(['sans', 'mono']);
 const MAX_CSS_VALUE_CHARS = 200;
-/** Assembled rather than written literally so eslint's no-script-url rule stays
- * happy; it is only ever used as a needle to reject markup, never as a URL. */
-const SCRIPT_SCHEME = `java${'script'}:`;
+/** Only ever used as a needle to reject markup, never navigated to. */
+// eslint-disable-next-line no-script-url
+const SCRIPT_SCHEME = 'javascript:';
 
 function camelCase(prop: string): string {
   return prop.trim().toLowerCase().replace(/-([a-z])/g, (_, c) => c.toUpperCase());

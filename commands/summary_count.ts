@@ -103,7 +103,6 @@ class Summary extends Command {
       },
     );
     for (let i = 1; i < chunks.length; i += 1) {
-      // eslint-disable-next-line no-await-in-loop
       await interaction.followUp({
         embeds: [new EmbedBuilder().setDescription(chunks[i])],
       });

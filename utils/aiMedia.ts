@@ -230,7 +230,6 @@ export async function collectMediaFromMessage(
       continue;
     }
 
-    // eslint-disable-next-line no-await-in-loop
     const buf = await downloadAttachment(att, cap);
     if (!buf) {
       notices.push(`⚠ Couldn't download **${att.name}** — continuing without it.`);

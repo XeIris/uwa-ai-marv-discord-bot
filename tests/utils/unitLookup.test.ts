@@ -26,7 +26,7 @@ describe('normalizeUnitCode', () => {
     ['path traversal', '../../etc/passwd'],
     ['a url', 'https://evil.example.com'],
   ])('rejects %s', (_label, input) => {
-    expect(normalizeUnitCode(input as any)).toBeNull();
+    expect(normalizeUnitCode(input)).toBeNull();
   });
 });
 

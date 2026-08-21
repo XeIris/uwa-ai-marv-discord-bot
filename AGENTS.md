@@ -41,7 +41,8 @@ is required and pinned — see `.claude/rules/deploy.md` for the places the vers
 - `bun test` — Bun test runner, `tests/` with the `tests/setup.ts` preload (30s default timeout),
   Jest-like API. Runs `--parallel` (one worker process per file); `bun run test:isolate` gives each
   file a fresh global if you suspect cross-file state.
-- `bun run lint` / `lint:fix` — ESLint (airbnb-base + node + promise).
+- `bun run lint` / `lint:fix` — ESLint 10, flat config in `eslint.config.mjs`
+  (airbnb-extended + n + promise + typescript-eslint).
 - `bun run typecheck` — `tsc --noEmit`.
 - `bun run fetch:soundfont` — download the GM soundfont for the JAYDON music generator.
 - `bun run fetch:fonts` — download the fonts for the diagram renderer (DejaVu) and the welcome

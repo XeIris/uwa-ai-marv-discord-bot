@@ -421,7 +421,7 @@ async function renderComposition(comp: ParsedComposition): Promise<Buffer | null
     blocksSinceYield += 1;
     if (blocksSinceYield >= YIELD_EVERY_BLOCKS) {
       blocksSinceYield = 0;
-      // eslint-disable-next-line no-await-in-loop
+
       await new Promise((resolve) => { setImmediate(resolve); });
     }
   }

@@ -105,8 +105,8 @@ describe('EventModel', () => {
       ['fractional', 1.5],
       ['NaN', Number.NaN],
     ])('rejects a %s event id before touching SQL', async (_label, id) => {
-      expect(db.event.clearImage(SERVER, id as number)).rejects.toThrow(/Invalid event id/);
-      expect(db.event.claimReminder('soon', id as number)).rejects.toThrow(/Invalid event id/);
+      expect(db.event.clearImage(SERVER, id)).rejects.toThrow(/Invalid event id/);
+      expect(db.event.claimReminder('soon', id)).rejects.toThrow(/Invalid event id/);
     });
 
     test('rejects a non-snowflake image identifier', async () => {

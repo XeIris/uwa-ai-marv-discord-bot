@@ -122,7 +122,6 @@ export async function createChatCompletionWithRetry(
       break;
     }
     try {
-      // eslint-disable-next-line no-await-in-loop
       return await client.chat.completions.create(body, {
         timeout: Math.max(1, Math.min(timeoutMs, remaining)),
       });
@@ -142,7 +141,7 @@ export async function createChatCompletionWithRetry(
         `[llm] completion failed (status ${err?.status ?? 'network/timeout'}), `
         + `retrying in ${delay / 1000}s (attempt ${attempt + 1}/${delays.length})`,
       );
-      // eslint-disable-next-line no-await-in-loop
+
       await sleep(delay);
     }
   }

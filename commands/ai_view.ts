@@ -21,7 +21,6 @@ class AiView extends Command {
     });
   }
 
-  // eslint-disable-next-line class-methods-use-this
   buildEmbed(sessions: any[], page: number, maxPage: number, search: string): Discord.EmbedBuilder {
     const start = page * SESSIONS_PER_PAGE;
     const rows = sessions.slice(start, start + SESSIONS_PER_PAGE).map((s: any) => {
@@ -46,7 +45,6 @@ class AiView extends Command {
       });
   }
 
-  // eslint-disable-next-line class-methods-use-this
   buildButtons(page: number, maxPage: number, disableAll = false): Discord.ActionRowBuilder<Discord.ButtonBuilder> {
     return new Discord.ActionRowBuilder<Discord.ButtonBuilder>()
       .addComponents(

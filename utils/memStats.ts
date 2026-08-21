@@ -43,10 +43,10 @@ export async function collectMemStats(client: any, forceGc = false): Promise<Mem
   let messageCacheTotal = 0;
   let memberCacheTotal = 0;
   for (const channel of client.channels.cache.values()) {
-    messageCacheTotal += (channel as any).messages?.cache?.size ?? 0;
+    messageCacheTotal += (channel).messages?.cache?.size ?? 0;
   }
   for (const guild of client.guilds.cache.values()) {
-    memberCacheTotal += (guild as any).members?.cache?.size ?? 0;
+    memberCacheTotal += (guild).members?.cache?.size ?? 0;
   }
 
   return {

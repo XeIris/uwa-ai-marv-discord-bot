@@ -51,7 +51,8 @@ const gracefulShutdown = async (signal: string) => {
   log(`Received ${signal}; shutting down`);
   try { silverwolf.eventScheduler.stop(); } catch (err) { logError('shutdown: event scheduler stop failed', err); }
   try { await shutdownMcp(); } catch (err) { logError('shutdown: mcp close failed', err); }
-  // eslint-disable-next-line no-process-exit
+
+  // eslint-disable-next-line n/no-process-exit
   process.exit(0);
 };
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

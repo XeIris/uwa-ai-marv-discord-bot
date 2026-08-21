@@ -100,7 +100,7 @@ async function main(): Promise<void> {
   for (const font of FONTS) {
     // Sequential on purpose: three small files, and a clear log order beats
     // shaving a second off a build step that only runs on a cold cache.
-    // eslint-disable-next-line no-await-in-loop
+
     await fetchOne(font);
   }
 }

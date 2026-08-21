@@ -194,7 +194,6 @@ async function readCapped(res: Response): Promise<Buffer | null> {
   let total = 0;
   try {
     for (;;) {
-      // eslint-disable-next-line no-await-in-loop
       const { done, value } = await reader.read();
       if (done) break;
       if (!value) continue;

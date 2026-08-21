@@ -1,3 +1,4 @@
+// eslint-disable-next-line import-x/no-cycle -- see the note in utils/ai.ts
 import { formatHistoryEntryForModel, formatMessageWithTimestamp, getGeminiAI } from './ai';
 import { getCalibrationMultiplier } from './tokenCalibration';
 

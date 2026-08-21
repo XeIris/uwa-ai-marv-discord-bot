@@ -186,7 +186,7 @@ class AiChatModel {
    * Fetches the last N messages for a session, returned in chronological order (oldest first).
    * Capped at 30 by default per cost constraints.
    */
-  async getHistory(sessionId: number, limit: number = 30): Promise<Record<string, any>[]> {
+  async getHistory(sessionId: number, limit = 30): Promise<Record<string, any>[]> {
     // DB query returns newest-first; reverse for chronological order
     const rows = await this.db.executeSelectAllQuery(
       aiChatQueries.GET_HISTORY,

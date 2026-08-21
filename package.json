@@ -37,14 +37,13 @@
   "devDependencies": {
     "@types/bun": "^1.4.0",
     "@types/node": "^26",
-    "@typescript-eslint/eslint-plugin": "^8.67.0",
-    "@typescript-eslint/parser": "^8.67.0",
-    "eslint": "^8.57.1",
-    "eslint-config-airbnb-base": "^15.0.0",
-    "eslint-plugin-import": "^2.32.0",
-    "eslint-plugin-node": "^11.1.0",
-    "eslint-plugin-promise": "^6.6.0",
-    "typescript": "^6.0.3"
+    "eslint": "^10",
+    "eslint-config-airbnb-extended": "^3.2.0",
+    "eslint-plugin-n": "^18.3.0",
+    "eslint-plugin-promise": "^7",
+    "globals": "^17.11.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.67.0"
   },
   "overrides": {
     "ws": "^8.21.0"

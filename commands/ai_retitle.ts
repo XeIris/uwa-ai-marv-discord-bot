@@ -116,7 +116,6 @@ class AiRetitle extends Command {
       const updatedLines: string[] = [];
 
       for (const session of sessions) {
-        // eslint-disable-next-line no-await-in-loop
         const result = await this.retitleSession(userId, session.sessionId);
         if (result.ok && result.title) {
           updated += 1;
