@@ -58,7 +58,11 @@ const CONTEXT_LIMITS: Record<string, number> = {
   // OpenRouter models
   // Calibration further narrows the effective budget based on real usage.
   'nvidia/nemotron-3-ultra-550b-a55b:free': 1_000_000,
-  'deepseek/deepseek-v4-flash-0731': 1_000_000,
+  // The model advertises 1M, but Marv routes it by price (see the persona's
+  // providerRouting) and the cheapest endpoints serve it at 256k. Budget for the
+  // smallest endpoint we can land on rather than the headline number — a 400 for
+  // overflowing a context we assumed was 4x bigger costs a reply.
+  'deepseek/deepseek-v4-flash-0731': 262_144,
   'xiaomi/mimo-v2-flash:nitro': 256_000,
   // 1M on the pinned Xiaomi endpoint; media (base64 parts) is not counted by
   // the tokenizer, so leave the standard reserve headroom to absorb it.

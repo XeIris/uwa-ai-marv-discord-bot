@@ -110,8 +110,66 @@ export interface Persona {
    * only). `true` means all of image/video/audio (omnimodal, e.g. MiMo);
    * an explicit list narrows it — vision-only models take `["image"]`.
    * Omitted/false = no media input.
+   *
+   * With `visionModel` set this describes the **vision** model, not `model` —
+   * see resolveTurnModel.
    */
   mediaInput?: boolean | MediaKind[];
+  /**
+   * Dual routing: the model to use for turns that carry attachments the chat
+   * model must actually see. Marv's default model (DeepSeek V4 Flash) is
+   * text-only, so image turns route here instead of losing the attachment.
+   * openrouter only; omitted means every turn uses `model`.
+   */
+  visionModel?: string;
+  /** Provider routing for `visionModel`; `providerRouting` covers `model`. */
+  visionProviderRouting?: Record<string, any>;
+  /**
+   * OpenRouter `reasoning` body field for `model`, e.g. `{ "enabled": false }`.
+   * Reasoning models bill their thinking as completion tokens and spend seconds
+   * on it — on DeepSeek V4 Flash a one-line chat answer measured 150 reasoning
+   * tokens and ~18s, versus 0 and ~10s with it off, with tool calling unaffected.
+   * Omitted leaves the provider default.
+   */
+  reasoning?: Record<string, any>;
+  /** Reasoning for `visionModel`; `reasoning` covers `model`. */
+  visionReasoning?: Record<string, any>;
+}
+
+/** Which model — and the per-model request settings — a turn should run on. */
+export interface TurnModel {
+  model: string;
+  providerRouting?: Record<string, any>;
+  reasoning?: Record<string, any>;
+}
+
+/**
+ * Picks the model for one turn.
+ *
+ * A persona may split its traffic across two models: a cheap text model for the
+ * common case and a multimodal one for turns that carry readable attachments.
+ * Provider routing and reasoning settings are model-specific (a pinned DeepSeek
+ * endpoint is meaningless for an OpenAI model), so they are selected alongside
+ * rather than carried over.
+ *
+ * Callers must pass the *same* answer to trimHistoryToFit and to every retry of
+ * the same turn — a text-only fallback after a vision failure is a text turn and
+ * must fall back to the text model, or the fallback silently costs vision-model
+ * prices.
+ */
+export function resolveTurnModel(persona: Persona, hasReadableMedia: boolean): TurnModel {
+  if (hasReadableMedia && persona.visionModel) {
+    return {
+      model: persona.visionModel,
+      providerRouting: persona.visionProviderRouting,
+      reasoning: persona.visionReasoning,
+    };
+  }
+  return {
+    model: persona.model,
+    providerRouting: persona.providerRouting,
+    reasoning: persona.reasoning,
+  };
 }
 
 /**
@@ -271,6 +329,11 @@ interface GenerateContentOptions {
   mediaParts?: any[];
   /** OpenRouter provider-routing body field (pin/exclude providers). */
   providerRouting?: Record<string, any>;
+  /**
+   * OpenRouter `reasoning` body field. Applied to every turn except the music
+   * composing turn, which needs the model to think (see the request builder).
+   */
+  reasoning?: Record<string, any>;
 }
 
 interface ImageAttachment {
@@ -387,7 +450,7 @@ function getImageGenConfig(): { model: string; modalities: string[] } {
 async function generateContentInner({
   db, userId, provider, model, systemPrompt, prompt, history = [], webSearchEnabled = false, imageGen, musicGen,
   diagramGen,
-  club, mediaParts = [], providerRouting,
+  club, mediaParts = [], providerRouting, reasoning,
 }: GenerateContentOptions): Promise<GenerateContentResult> {
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
@@ -481,6 +544,12 @@ ${systemPrompt || ''}
       };
       if (providerRouting) {
         requestBody.provider = providerRouting;
+      }
+      // The composing turn is the one place thinking earns its tokens — the
+      // arrangement is worked out there — so a persona that switches reasoning
+      // off for ordinary chat still gets it here.
+      if (reasoning && !musicGuideRead) {
+        requestBody.reasoning = reasoning;
       }
       if (toolsAvailable && !isLastForcedClose) {
         requestBody.tools = toolDefs;

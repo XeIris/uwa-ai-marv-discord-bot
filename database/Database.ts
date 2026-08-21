@@ -14,6 +14,7 @@ import eventReminderQueries from './queries/eventReminderQueries';
 import * as modelClasses from './models';
 import type { TableDefinition, QueryResult } from './types';
 import type AiChatModel from './models/AiChatModel';
+import type AiConsentModel from './models/AiConsentModel';
 import type AiUsageModel from './models/AiUsageModel';
 import type CommandConfigModel from './models/CommandConfigModel';
 import type CommitteeModel from './models/CommitteeModel';
@@ -377,6 +378,7 @@ class Database {
   async dumpGlobalConfig(): Promise<string> { return this.dumpTable('GlobalConfig', []); }
 
   get aiChat(): AiChatModel { return this.models.AiChatModel; }
+  get aiConsent(): AiConsentModel { return this.models.AiConsentModel; }
   get aiUsage(): AiUsageModel { return this.models.AiUsageModel; }
   get commandConfig(): CommandConfigModel { return this.models.CommandConfigModel; }
   get committee(): CommitteeModel { return this.models.CommitteeModel; }

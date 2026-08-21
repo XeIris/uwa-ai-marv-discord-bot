@@ -8,7 +8,9 @@ import {
   generateContent,
   generateTitleForHistory,
   getPersonaMediaKinds,
+  resolveTurnModel,
 } from '../../utils/ai';
+import { ensureAiConsent } from '../../utils/aiConsent';
 import { getRateLimitErrorMessage } from '../../utils/discordRateLimit';
 import { IMAGE_GEN_TOOL_NAME, IMAGE_EDIT_MAX_SOURCES } from '../../utils/imageGen';
 import { MUSIC_GEN_TOOL_NAME, MUSIC_GUIDE_TOOL_NAME } from '../../utils/musicGen';
@@ -29,6 +31,17 @@ const scriptHandlers = {
     const username = message.author?.username
       ? message.author.username.toLowerCase()
       : 'user';
+
+    // One-time data notice, before anything is read, stored, or sent onward —
+    // that ordering is the point, so a declining user's attachments are never
+    // even downloaded. Steady state is a cached Map lookup (AiConsentModel).
+    const consented = await ensureAiConsent(
+      (message.client as any).db,
+      message.author.id,
+      (payload) => message.reply({ ...payload, allowedMentions: { repliedUser: false } }),
+    );
+    if (!consented) return;
+
     // `-n` requests a fresh session and is stripped before the model sees it.
     const { requested: shouldStartNewSession, text: query } = parseNewSessionFlag(message.content || '');
 
@@ -193,10 +206,14 @@ const scriptHandlers = {
         // exclude them from the token budget so they don't crowd out real turns.
         const filteredHistory = rawHistory.filter((h: { role: string }) => h.role !== 'tool');
 
-        // Token-based sliding window: trim oldest messages to fit context
+        // Token-based sliding window: trim oldest messages to fit context.
+        // Budgeted against the model this turn will actually run on — a dual-
+        // routed persona's two models can have different context windows. A
+        // vision turn that falls back to text-only keeps this budget, which is
+        // safe as long as the text model's window is no smaller.
         const { trimmedHistory, warnings } = await trimHistoryToFit(
           persona.provider,
-          persona.model,
+          resolveTurnModel(persona, mediaParts.length > 0).model,
           persona.systemPrompt ?? '',
           filteredHistory,
           prompt,
@@ -218,17 +235,20 @@ const scriptHandlers = {
       const webhooks = await (message.channel as TextChannel).fetchWebhooks();
       let webhook = webhooks.find((wh: any) => wh.name === WEBHOOK_NAME && wh.token);
 
+      // Dual routing: attachments the chat model must see force the persona's
+      // vision model, everything else takes the cheap default. `withMedia` is
+      // the whole input — the text-only retry below therefore also drops back to
+      // the text model instead of paying vision prices for a text turn.
       const generateOnce = (withMedia: boolean) => generateContent({
         db: (message.client as any).db,
         userId: message.author.id,
         provider: persona.provider,
-        model: persona.model,
+        ...resolveTurnModel(persona, withMedia),
         systemPrompt: persona.systemPrompt ?? '',
         prompt,
         history,
         webSearchEnabled: persona.webSearchEnabled,
         mediaParts: withMedia ? mediaParts : [],
-        providerRouting: persona.providerRouting,
         // Image generation is Discord-only (delivery rides this webhook); the
         // rate limit is keyed to the requesting Discord user. Attached images
         // ride along as edit sources for the generate_image tool. The

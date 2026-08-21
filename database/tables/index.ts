@@ -1,5 +1,6 @@
 import aiChatHistoryTable from './aiChatHistoryTable';
 import aiChatSessionTable from './aiChatSessionTable';
+import aiConsentTable from './aiConsentTable';
 import aiRateLimitWindowTable from './aiRateLimitWindowTable';
 import aiUsageTable from './aiUsageTable';
 import commandConfigTable from './commandConfigTable';
@@ -16,6 +17,7 @@ import serverConfigTable from './serverConfigTable';
 export {
   aiChatHistoryTable,
   aiChatSessionTable,
+  aiConsentTable,
   aiRateLimitWindowTable,
   aiUsageTable,
   commandConfigTable,

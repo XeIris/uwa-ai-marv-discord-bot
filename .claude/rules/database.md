@@ -32,6 +32,9 @@ personaName)`, `db.aiUsage.addUsage(...)`.
 - **AI chat:** `AiChatSession` + `AiChatHistory` (`db.aiChat`) — one active session per
   user+persona (unique index enforces it, `source='discord'`), history rows are `user`/`assistant`
   (`model` for Gemini) plus audit-only `tool` rows that are filtered out on replay.
+- **AI consent:** `AiConsent` (`db.aiConsent`) — one row per user recording which version of the
+  data notice they accepted; absence means no consent and no generation. See
+  `.claude/rules/ai-limits.md`.
 - **Credit metering:** `AiUsage` (audit log, raw tokens + derived USD cost) + `AiRateLimitWindow`
   (`tokens` column stores credits) via `db.aiUsage` — see `.claude/rules/ai-limits.md`.
 - **Per-guild settings:** `ServerConfig` (`db.serverConfig`, keyed by `server_id` + `key`) — named
