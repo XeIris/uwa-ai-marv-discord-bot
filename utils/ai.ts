@@ -1,11 +1,12 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { OpenAI } from 'openai';
-import mime from 'mime';
 import type Database from '../database/Database';
 import { logError, logWarning } from './log';
 import { recordUsage, getCalibrationMultiplier } from './tokenCalibration';
+// Pre-existing cycle: tokenizer imports the history formatting helpers back
+// out of this module. Untangling it is a refactor, not a lint fix.
+// eslint-disable-next-line import-x/no-cycle
 import { countTokensOpenRouterMessages } from './tokenizer';
-import { listSearchTools, listSearchToolsGemini, callSearchTool } from './mcp';
+import { listSearchTools, callSearchTool } from './mcp';
 import { creditsForTokens, isFreeModel, ESTIMATED_COMPLETION_TOKENS } from './aiPricing';
 import { createChatCompletionWithRetry } from './llmRetry';
 import { ALL_MEDIA_KINDS, type MediaKind } from './aiMedia';
@@ -15,7 +16,6 @@ import {
   IMAGE_EDIT_MAX_SOURCES,
   IMAGE_GEN_FALLBACK_MODEL,
   imageGenToolDef,
-  imageGenGeminiDecl,
   runImageGeneration,
   type ImageGenContext,
 } from './imageGen';
@@ -23,7 +23,6 @@ import {
   MUSIC_GUIDE_TOOL_NAME,
   MUSIC_GEN_TOOL_NAME,
   musicToolDefs,
-  musicGeminiDecls,
   buildMusicGenNote,
   getMusicGuide,
   runMusicGeneration,
@@ -33,7 +32,6 @@ import {
   DIAGRAM_GUIDE_TOOL_NAME,
   DIAGRAM_GEN_TOOL_NAME,
   diagramToolDefs,
-  diagramGeminiDecls,
   buildDiagramGenNote,
   getDiagramGuide,
   runDiagramGeneration,
@@ -44,7 +42,6 @@ import {
   COMMITTEE_TOOL_NAME,
   CLUB_TOOL_NAMES,
   clubToolDefs,
-  clubGeminiDecls,
   buildClubNote,
   getConstitution,
   runListCommittee,
@@ -54,22 +51,21 @@ import {
 import {
   SHEET_TOOL_NAMES,
   sheetToolDefs,
-  sheetGeminiDecls,
   buildSheetsNote,
   getSheet,
 } from './referenceSheets';
 import {
   UNIT_TOOL_NAME,
   unitToolDef,
-  unitGeminiDecl,
   buildUnitNote,
   runUnitLookup,
 } from './unitLookup';
+
+// Load personas configuration
+import personasData from '../data/aiPersonas.json';
 // Note: Bun automatically reads .env files
 
 // Initialize AI providers
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_TOKEN!);
-
 const openrouter = new OpenAI({
   baseURL: 'https://openrouter.ai/api/v1',
   apiKey: process.env.OPENROUTER_API_KEY,
@@ -81,10 +77,6 @@ const openrouter = new OpenAI({
     'X-Title': 'Silverwolf',
   },
 });
-
-// Load personas configuration
-// eslint-disable-next-line import/first
-import personasData from '../data/aiPersonas.json';
 
 const personasConfig: any = (personasData as any).personasConfig || personasData;
 
@@ -179,7 +171,7 @@ export function resolveTurnModel(persona: Persona, hasReadableMedia: boolean): T
 export function getPersonaMediaKinds(persona: Persona): MediaKind[] {
   if (persona.provider !== 'openrouter' || !persona.mediaInput) return [];
   if (persona.mediaInput === true) return [...ALL_MEDIA_KINDS];
-  return persona.mediaInput.filter((k): k is MediaKind => ALL_MEDIA_KINDS.includes(k as MediaKind));
+  return persona.mediaInput.filter((k): k is MediaKind => ALL_MEDIA_KINDS.includes(k));
 }
 
 export interface ToolCallRecord {
@@ -401,10 +393,13 @@ async function resolvePersona(messageContent = ''): Promise<Persona> {
   const defaults = personasConfig.defaults || {};
   return {
     name: 'Default',
-    provider: defaults.provider || 'gemini',
-    model: defaults.model || 'gemini-3.1-flash-lite',
+    provider: defaults.provider || 'openrouter',
+    model: defaults.model || 'deepseek/deepseek-v4-flash-0731',
     systemPrompt: defaults.systemPrompt || 'You are a helpful AI assistant.',
     responseModalities: defaults.responseModalities || ['TEXT'],
+    // Carried through so a `reasoning` added to `defaults` isn't silently dropped
+    // for the one persona that has no entry of its own.
+    reasoning: defaults.reasoning,
   };
 }
 
@@ -567,7 +562,7 @@ ${systemPrompt || ''}
       try {
         // Music composing turns emit a large composition JSON under a raised
         // max_tokens cap — give them a longer per-attempt timeout.
-        // eslint-disable-next-line no-await-in-loop
+
         completion = await createChatCompletionWithRetry(openrouter, requestBody, {
           timeoutMs: musicGuideRead ? 480_000 : undefined,
         });
@@ -580,7 +575,7 @@ ${systemPrompt || ''}
           logWarning(`[ai] model ${model} rejected tools; retrying without`);
           toolsAvailable = false;
           iter -= 1;
-          // eslint-disable-next-line no-continue
+
           continue;
         }
         throw err;
@@ -629,7 +624,7 @@ ${systemPrompt || ''}
         // written without the guide in context).
         const guideReadAtBatchStart = musicGuideRead;
         const diagramGuideReadAtBatchStart = diagramGuideRead;
-        // eslint-disable-next-line no-await-in-loop
+
         const results = await Promise.all(reqToolCalls.map(async (tc: any) => {
           const callName = tc.function?.name ?? '';
           let parsedArgs: Record<string, any> = {};
@@ -754,7 +749,7 @@ ${systemPrompt || ''}
           if (r.callName === MUSIC_GUIDE_TOOL_NAME && r.ok) musicGuideRead = true;
           if (r.callName === DIAGRAM_GUIDE_TOOL_NAME && r.ok) diagramGuideRead = true;
         }
-        // eslint-disable-next-line no-continue
+
         continue;
       }
 
@@ -774,338 +769,6 @@ ${systemPrompt || ''}
       }
     }
     return { text: cleanedText, images: generatedImages, toolCalls };
-  }
-
-  if (provider === 'gemini') {
-    const currentGeminiModel = model;
-    const isImageModel = currentGeminiModel === 'gemini-2.0-flash-preview-image-generation';
-    let shouldUseSystemInstruction = true;
-    let processedPrompt = prompt;
-
-    if (isImageModel) {
-      shouldUseSystemInstruction = false;
-      processedPrompt = prompt.replace(/@imgen/g, '').trim();
-    }
-    processedPrompt = formatMessageWithTimestamp(processedPrompt, now);
-
-    // Image-gen models can't combine with tool calling.
-    let geminiTools: any[] = [];
-    if (webSearchEnabled && !isImageModel) {
-      geminiTools = await listSearchToolsGemini();
-      if (geminiTools.length === 0) {
-        logWarning('[ai] webSearchEnabled but no MCP tools available; proceeding without tools');
-      }
-    }
-    const searchToolNames = geminiTools.length > 0
-      ? geminiTools[0].functionDeclarations.map((f: any) => f.name).join(', ')
-      : '';
-    const searchToolNote = geminiTools.length > 0
-      ? `\n\nYou have web search tools available (${searchToolNames}). USE THEM whenever the user asks about current events, recent releases, prices, news, or anything that may have changed since your training cutoff. Don't say "I can't browse the web" — call the tool.`
-      : '';
-    if (imageGen && !isImageModel) {
-      if (geminiTools.length === 0) geminiTools = [{ functionDeclarations: [] }];
-      geminiTools[0].functionDeclarations.push(imageGenGeminiDecl(imageGen));
-    }
-    if (musicGen && !isImageModel) {
-      if (geminiTools.length === 0) geminiTools = [{ functionDeclarations: [] }];
-      geminiTools[0].functionDeclarations.push(...musicGeminiDecls());
-    }
-    if (diagramGen && !isImageModel) {
-      if (geminiTools.length === 0) geminiTools = [{ functionDeclarations: [] }];
-      geminiTools[0].functionDeclarations.push(...diagramGeminiDecls());
-    }
-    if (club && !isImageModel) {
-      if (geminiTools.length === 0) geminiTools = [{ functionDeclarations: [] }];
-      geminiTools[0].functionDeclarations.push(...clubGeminiDecls(), ...sheetGeminiDecls(), unitGeminiDecl());
-    }
-    const imageGenNote = !isImageModel ? buildImageGenNote(imageGen) : '';
-    const musicGenNote = !isImageModel ? buildMusicGenNote(musicGen) : '';
-    const diagramGenNote = !isImageModel ? buildDiagramGenNote(diagramGen) : '';
-    const clubNote = (!isImageModel && club) ? buildClubNote(club) + buildSheetsNote() + buildUnitNote() : '';
-    const useTools = geminiTools.length > 0;
-    const toolNote = searchToolNote + imageGenNote + musicGenNote + diagramGenNote + clubNote;
-
-    const modelClientOptions: any = {
-      model: currentGeminiModel,
-    };
-
-    if (shouldUseSystemInstruction) {
-      modelClientOptions.systemInstruction = systemPrompt + toolNote;
-    }
-    if (useTools) {
-      modelClientOptions.tools = geminiTools;
-    }
-    if (musicGen && !isImageModel) {
-      // Mirror the OpenRouter composing budget: generate_music arguments are a
-      // large composition JSON that can truncate under the model's default
-      // output cap. The SDK only takes generationConfig per model/chat session,
-      // so the raised cap applies to the whole music-enabled session.
-      modelClientOptions.generationConfig = { maxOutputTokens: 32768 };
-    }
-
-    const modelClient = genAI.getGenerativeModel(modelClientOptions);
-
-    // Map DB history rows → Gemini SDK format ({ role: 'user'|'model', parts: [{text}] }).
-    // 'assistant' (from openrouter turns) is normalized to 'model'; 'tool' rows are dropped.
-    const geminiHistory = history
-      .filter((h) => h.role === 'user' || h.role === 'model' || h.role === 'assistant')
-      .map((h) => ({
-        role: (h.role === 'assistant' ? 'model' : h.role) as 'user' | 'model',
-        parts: [{ text: formatHistoryEntryForModel(h) }],
-      }));
-
-    // Gemini requires history to not start with a 'model' turn
-    if (geminiHistory.length > 0 && geminiHistory[0].role === 'model') {
-      geminiHistory.shift();
-    }
-
-    // For non-image models: use startChat with history, then sendMessage (with tool loop if enabled)
-    if (!isImageModel) {
-      const chatSession = modelClient.startChat({ history: geminiHistory });
-      const toolCalls: ToolCallRecord[] = [];
-      const generatedImages: ImageAttachment[] = [];
-      // generate_music is rejected until get_music_guide has been read in a
-      // *prior* iteration — the composition must be written with the guide in context.
-      let musicGuideRead = false;
-      let diagramGuideRead = false;
-
-      let result = await chatSession.sendMessage(processedPrompt);
-      let fullText = '';
-
-      for (let iter = 0; iter < MAX_TOOL_ITERATIONS + 1; iter += 1) {
-        const response = await result.response;
-        if (response.usageMetadata) {
-          totalPromptTokens += response.usageMetadata.promptTokenCount ?? 0;
-          totalCompletionTokens += response.usageMetadata.candidatesTokenCount ?? 0;
-        }
-        const fnCalls = typeof response.functionCalls === 'function'
-          ? (response.functionCalls() ?? [])
-          : [];
-
-        if (iter === MAX_TOOL_ITERATIONS && fnCalls.length > 0) {
-          fullText = 'Tool budget exhausted — the assistant could not complete the request. Try again or simplify the request.';
-          break;
-        }
-
-        if (!useTools || fnCalls.length === 0) {
-          try { fullText = response.text(); } catch { fullText = ''; }
-          break;
-        }
-
-        const guideReadAtBatchStart = musicGuideRead;
-        const diagramGuideReadAtBatchStart = diagramGuideRead;
-        // eslint-disable-next-line no-await-in-loop
-        const fnResponses = await Promise.all(fnCalls.map(async (fc: any) => {
-          const args = (fc.args ?? {}) as Record<string, any>;
-          if (musicGen && fc.name === MUSIC_GUIDE_TOOL_NAME) {
-            const guide = await getMusicGuide();
-            const guideOk = !guide.startsWith('Error:');
-            toolCalls.push({
-              name: fc.name, args, resultText: guide, ok: guideOk,
-            });
-            return {
-              functionResponse: {
-                name: fc.name,
-                response: { result: guide },
-              },
-            };
-          }
-          if (musicGen && fc.name === MUSIC_GEN_TOOL_NAME) {
-            const genRes = await runMusicGeneration({
-              ctx: musicGen, args, guideWasRead: guideReadAtBatchStart,
-            });
-            const genContent = genRes.ok ? genRes.resultText : genRes.error;
-            if (genRes.ok) generatedImages.push(genRes.attachment);
-            toolCalls.push({
-              name: fc.name, args: redactToolCallArgs(fc.name, args), resultText: genContent, ok: genRes.ok,
-            });
-            return {
-              functionResponse: {
-                name: fc.name,
-                response: { result: genContent },
-              },
-            };
-          }
-          if (imageGen && fc.name === IMAGE_GEN_TOOL_NAME) {
-            const genRes = await runImageGeneration({
-              ctx: imageGen, openrouter, ...getImageGenConfig(), args,
-            });
-            const genContent = genRes.ok ? genRes.resultText : genRes.error;
-            if (genRes.ok) generatedImages.push(genRes.attachment);
-            toolCalls.push({
-              name: fc.name, args: redactToolCallArgs(fc.name, args), resultText: genContent, ok: genRes.ok,
-            });
-            return {
-              functionResponse: {
-                name: fc.name,
-                response: { result: genContent },
-              },
-            };
-          }
-          if (diagramGen && fc.name === DIAGRAM_GUIDE_TOOL_NAME) {
-            const guide = await getDiagramGuide();
-            const guideOk = !guide.startsWith('Error:');
-            toolCalls.push({
-              name: fc.name, args, resultText: guide, ok: guideOk,
-            });
-            return {
-              functionResponse: {
-                name: fc.name,
-                response: { result: guide },
-              },
-            };
-          }
-          if (diagramGen && fc.name === DIAGRAM_GEN_TOOL_NAME) {
-            const genRes = await runDiagramGeneration({
-              ctx: diagramGen, args, guideWasRead: diagramGuideReadAtBatchStart,
-            });
-            const genContent = genRes.ok ? genRes.resultText : genRes.error;
-            if (genRes.ok) generatedImages.push(genRes.attachment);
-            toolCalls.push({
-              name: fc.name, args: redactToolCallArgs(fc.name, args), resultText: genContent, ok: genRes.ok,
-            });
-            return {
-              functionResponse: {
-                name: fc.name,
-                response: { result: genContent },
-              },
-            };
-          }
-          if (club && SHEET_TOOL_NAMES.includes(fc.name)) {
-            const sheet = await getSheet(fc.name);
-            toolCalls.push({
-              name: fc.name, args, resultText: sheet, ok: !sheet.startsWith('Error:'),
-            });
-            return { functionResponse: { name: fc.name, response: { result: sheet } } };
-          }
-          if (club && fc.name === UNIT_TOOL_NAME) {
-            const unit = await runUnitLookup(args);
-            toolCalls.push({
-              name: fc.name, args, resultText: unit, ok: !unit.startsWith('Error:'),
-            });
-            // Scraped from the UWA site, so treat it as third-party text.
-            return {
-              functionResponse: {
-                name: fc.name,
-                response: { result: `<<MCP_TOOL_RESULT>>\n${unit}\n<</MCP_TOOL_RESULT>>` },
-              },
-            };
-          }
-          if (club && CLUB_TOOL_NAMES.includes(fc.name)) {
-            let clubContent: string;
-            if (fc.name === CONSTITUTION_TOOL_NAME) clubContent = await getConstitution();
-            else if (fc.name === COMMITTEE_TOOL_NAME) clubContent = await runListCommittee(club, args);
-            else clubContent = await runListEvents(club, args);
-            toolCalls.push({
-              name: fc.name, args, resultText: clubContent, ok: !clubContent.startsWith('Error:'),
-            });
-            // First-party data — not wrapped in the untrusted-result markers.
-            return {
-              functionResponse: {
-                name: fc.name,
-                response: { result: clubContent },
-              },
-            };
-          }
-          const res = await callSearchTool(fc.name, args);
-          const content = res.ok ? res.content : `Error: ${res.error}`;
-          toolCalls.push({
-            name: fc.name, args, resultText: content, ok: res.ok,
-          });
-          return {
-            functionResponse: {
-              name: fc.name,
-              response: { result: `<<MCP_TOOL_RESULT>>\n${content}\n<</MCP_TOOL_RESULT>>` },
-            },
-          };
-        }));
-
-        if (!musicGuideRead
-          && toolCalls.some((t) => t.name === MUSIC_GUIDE_TOOL_NAME && t.ok)) {
-          musicGuideRead = true;
-        }
-        if (!diagramGuideRead
-          && toolCalls.some((t) => t.name === DIAGRAM_GUIDE_TOOL_NAME && t.ok)) {
-          diagramGuideRead = true;
-        }
-
-        // eslint-disable-next-line no-await-in-loop
-        result = await chatSession.sendMessage(fnResponses);
-      }
-
-      if (db && userId && (totalPromptTokens > 0 || totalCompletionTokens > 0)) {
-        try {
-          await db.aiUsage.addUsage(userId, model, totalPromptTokens, totalCompletionTokens);
-        } catch (err) {
-          logError('Failed to record AI usage (Gemini Chat):', err);
-        }
-      }
-      return { text: fullText, images: generatedImages, toolCalls };
-    }
-
-    // Image-generation model: stateless generateContentStream (no history)
-    const contents = [
-      {
-        role: 'user',
-        parts: [{ text: processedPrompt }],
-      },
-    ];
-
-    const generateContentStreamOptions: any = {
-      contents,
-    };
-
-    if (currentGeminiModel === 'gemini-2.0-flash-preview-image-generation') {
-      generateContentStreamOptions.generationConfig = {
-        responseModalities: ['IMAGE', 'TEXT'],
-      };
-    }
-
-    const resultObject = await modelClient.generateContentStream(
-      generateContentStreamOptions,
-    );
-
-    let fullText = '';
-    const imageAttachments: ImageAttachment[] = [];
-    let fileIndex = 0;
-
-    // eslint-disable-next-line no-restricted-syntax
-    for await (const chunk of resultObject.stream) {
-      if (chunk.candidates?.[0]?.content?.parts) {
-        // eslint-disable-next-line no-loop-func
-        chunk.candidates[0].content.parts.forEach((part: any) => {
-          if (part.inlineData) {
-            const { inlineData } = part;
-            const fileExtension = mime.getExtension(inlineData.mimeType || 'image/png') || 'png';
-            const buffer = Buffer.from(inlineData.data || '', 'base64');
-            imageAttachments.push({
-              attachment: buffer,
-              name: `image_${fileIndex}.${fileExtension}`,
-            });
-            fileIndex += 1;
-          } else if (part.text) {
-            fullText += part.text;
-          }
-        });
-      }
-    }
-    try {
-      const finalResponse = await resultObject.response;
-      if (finalResponse.usageMetadata) {
-        totalPromptTokens = finalResponse.usageMetadata.promptTokenCount ?? 0;
-        totalCompletionTokens = finalResponse.usageMetadata.candidatesTokenCount ?? 0;
-      }
-    } catch {
-      // Ignored
-    }
-    if (db && userId && (totalPromptTokens > 0 || totalCompletionTokens > 0)) {
-      try {
-        await db.aiUsage.addUsage(userId, model, totalPromptTokens, totalCompletionTokens);
-      } catch (err) {
-        logError('Failed to record AI usage (Gemini Image/Fallback):', err);
-      }
-    }
-    return { text: fullText, images: imageAttachments, toolCalls: [] };
   }
 
   throw new Error(`Unknown provider: ${provider}`);
@@ -1163,13 +826,6 @@ async function generateContent(opts: GenerateContentOptions): Promise<GenerateCo
   } finally {
     db.aiUsage.release(userId, reserved);
   }
-}
-
-/**
- * Gets the Gemini AI instance for direct usage
- */
-function getGeminiAI(): GoogleGenerativeAI {
-  return genAI;
 }
 
 /**
@@ -1290,13 +946,6 @@ async function generateSessionTitle(conversation: string): Promise<string | null
         reasoning: { enabled: false },
       } as any, { timeoutMs: 60_000 });
       raw = completion.choices?.[0]?.message?.content ?? null;
-    } else if (persona.provider === 'gemini') {
-      const model = genAI.getGenerativeModel({
-        model: persona.model,
-        systemInstruction: systemPrompt,
-      });
-      const result = await model.generateContent(userContent);
-      raw = result.response.text();
     } else {
       logError(`TitleGen: unsupported provider "${persona.provider}"`);
       return null;
@@ -1336,7 +985,6 @@ export {
   generateContent,
   generateSessionTitle,
   generateTitleForHistory,
-  getGeminiAI,
   getOpenRouterClient,
   getPersonaByName,
   getPersonaInvokeLabel,

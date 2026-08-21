@@ -67,11 +67,11 @@ stored value alone (`EventModel.update` only writes what it's given).
 
 ## AI tools
 
-`utils/clubInfo.ts` exports `recall_constitution` / `list_committee` / `list_events` in both the
-OpenRouter and Gemini shapes, mirroring the `get_music_guide` skill pattern. They're wired into
+`utils/clubInfo.ts` exports `recall_constitution` / `list_committee` / `list_events` in the
+OpenRouter tool shape, mirroring the `get_music_guide` skill pattern. They're wired into
 `utils/ai.ts` behind the `club?: ClubContext` option and gated by the persona's `clubTools` flag.
 Results are **trusted** — first-party DB/repo content, so they are not wrapped in
-`<<MCP_TOOL_RESULT>>` markers. Adding a tool means touching both provider branches plus
+`<<MCP_TOOL_RESULT>>` markers. Adding a tool means touching the OpenRouter tool list plus
 `CLUB_TOOL_NAMES` (which also drives the `nonSearchTools` reply footer in
 `keywordsBehaviorHandler.ts`). The sheet and unit tools below ride the same `club` gate, so all of
 Marv's extras appear and disappear together.

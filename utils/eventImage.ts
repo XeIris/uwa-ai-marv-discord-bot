@@ -134,7 +134,6 @@ async function readCapped(response: Response, limit: number): Promise<Buffer | n
   let total = 0;
   try {
     for (;;) {
-      // eslint-disable-next-line no-await-in-loop
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;

@@ -83,7 +83,6 @@ class Command {
     }
   }
 
-  // eslint-disable-next-line class-methods-use-this, no-unused-vars
   async run(_interaction: any): Promise<void> {
     throw new Error('run method must be implemented by subclasses');
   }

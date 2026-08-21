@@ -225,7 +225,6 @@ class EventAnnounce extends AdminCommand {
     }
   }
 
-  // eslint-disable-next-line class-methods-use-this
   private buildEmbed(event: any, imageName: string | null, colour: string): EmbedBuilder {
     const lines = [`${discordTimestamp(event.startsAt)} (${discordTimestamp(event.startsAt, 'R')})`];
     if (event.endsAt) lines.push(`until ${discordTimestamp(event.endsAt)}`);

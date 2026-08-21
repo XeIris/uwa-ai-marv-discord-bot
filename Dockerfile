@@ -1,5 +1,5 @@
 # --- STAGE 1: Build ---
-FROM oven/bun:1 AS builder
+FROM oven/bun:1.4 AS builder
 WORKDIR /app
 
 COPY package.json bun.lock ./
@@ -19,7 +19,7 @@ COPY scripts/fetch-fonts.ts ./scripts/fetch-fonts.ts
 RUN bun scripts/fetch-fonts.ts
 
 # --- STAGE 2: Run ---
-FROM oven/bun:1-slim
+FROM oven/bun:1.4-slim
 WORKDIR /app
 
 # Create persistence directory and set permissions

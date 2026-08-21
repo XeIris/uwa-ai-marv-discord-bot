@@ -34,13 +34,23 @@ duplicate their content here.
 
 ## Commands
 
-Boot locally: `bun install` → create `.env` (see `.env.example`) → `bun run dev`.
+Boot locally: `bun install` → create `.env` (see `.env.example`) → `bun run dev`. **Bun 1.4+**
+is required and pinned — see `.claude/rules/deploy.md` for the places the version lives.
 
 - `bun run dev` / `bun run start` — run `index.ts` (dev is `--watch`).
 - `bun test` — Bun test runner, `tests/` with the `tests/setup.ts` preload (30s default timeout),
-  Jest-like API.
-- `bun run lint` / `lint:fix` — ESLint (airbnb-base + node + promise).
-- `bun run typecheck` — `tsc --noEmit`.
+  Jest-like API. Runs `--parallel`, which spreads the files over one worker process per CPU core
+  and implies `--isolate` (each file gets a fresh global). `bun run test:isolate` is the
+  single-process equivalent — same isolation, no parallelism — for when parallel output is hard
+  to read or you're bisecting a flake.
+- `bun run lint` / `lint:fix` — ESLint 10, flat config in `eslint.config.mjs`
+  (airbnb-extended + n + promise + typescript-eslint).
+- `bun run typecheck` — `tsc --noEmit`, on **TypeScript 7** (the Go compiler).
+  TS 7 dropped the programmatic API, which typescript-eslint still needs, so the two run
+  side-by-side per Microsoft's guidance: `@typescript/native` is an alias for `typescript@7`
+  and supplies `tsc`, while the `typescript` name is aliased to `@typescript/typescript6` so
+  library importers get the 6.0 API (and `tsc6` if you want it). Collapse this back to a plain
+  `typescript` dependency once typescript-eslint supports 7.1's new API.
 - `bun run fetch:soundfont` — download the GM soundfont for the JAYDON music generator.
 - `bun run fetch:fonts` — download the fonts for the diagram renderer (DejaVu) and the welcome
   card (Bruno Ace).
@@ -125,7 +135,8 @@ separate per-member opt-in needing no guild config) and drains the `EventNotice`
 `utils/pdf.ts` (PDF extraction), `utils/clubInfo.ts` (club data tools),
 `utils/aiConsent.ts` (one-time data-notice gate),
 `utils/eventReminders.ts` (DM reminder lead times), `utils/embedColour.ts` (announce colours),
-`utils/welcomeCard.ts` (join welcome card).
+`utils/welcomeCard.ts` (join welcome card),
+`utils/memoryPressure.ts` (OS low-memory notification → discord.js cache sweep).
 
 ## Security & performance guardrails
 

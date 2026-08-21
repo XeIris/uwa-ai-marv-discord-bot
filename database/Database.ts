@@ -271,7 +271,7 @@ class Database {
   checkIfColumnExists(tableName: string, columnName: string): boolean {
     // bun:sqlite is synchronous, no need for Promise wrapper
     const query = `PRAGMA table_info(${tableName})`;
-    const rows = this.db.query(query).all() as Array<{ name: string }>;
+    const rows = this.db.query(query).all() as { name: string }[];
     return rows.some((row) => row.name === columnName);
   }
 

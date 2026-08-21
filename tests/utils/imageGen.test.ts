@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
   imageGenToolDef,
-  imageGenGeminiDecl,
   runImageGeneration,
   resetSelfPortraitCache,
   type ImageGenContext,
@@ -53,9 +52,6 @@ describe('imageGenToolDef', () => {
       .toBeUndefined();
     expect(imageGenToolDef({ selfPortrait: true }).function.parameters.properties.use_self_portrait)
       .toBeDefined();
-
-    expect(imageGenGeminiDecl().parameters.properties.use_self_portrait).toBeUndefined();
-    expect(imageGenGeminiDecl({ selfPortrait: true }).parameters.properties.use_self_portrait).toBeDefined();
   });
 });
 

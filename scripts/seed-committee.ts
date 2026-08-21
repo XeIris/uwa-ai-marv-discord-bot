@@ -78,7 +78,7 @@ async function main(): Promise<void> {
 
   for (let i = 0; i < roster.length; i += 1) {
     const member = roster[i];
-    // eslint-disable-next-line no-await-in-loop
+
     await db.committee.upsert(guildId, member.userId, member.title, {
       displayName: member.displayName,
       isExecutive: member.isExecutive,

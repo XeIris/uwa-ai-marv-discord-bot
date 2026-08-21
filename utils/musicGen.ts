@@ -105,28 +105,6 @@ export function musicToolDefs(): any[] {
   ];
 }
 
-export function musicGeminiDecls(): any[] {
-  return [
-    {
-      name: MUSIC_GUIDE_TOOL_NAME,
-      description: GUIDE_TOOL_DESCRIPTION,
-      parameters: { type: 'OBJECT', properties: {} },
-    },
-    {
-      name: MUSIC_GEN_TOOL_NAME,
-      description: GEN_TOOL_DESCRIPTION,
-      parameters: {
-        type: 'OBJECT',
-        properties: {
-          title: { type: 'STRING', description: 'Short title for the piece (used as the file name).' },
-          composition: { type: 'STRING', description: COMPOSITION_ARG_DESCRIPTION },
-        },
-        required: ['composition'],
-      },
-    },
-  ];
-}
-
 /** System-prompt note advertising the music tools (kept tiny — details live in the guide). */
 export function buildMusicGenNote(musicGen?: MusicGenContext): string {
   if (!musicGen) return '';
@@ -421,7 +399,7 @@ async function renderComposition(comp: ParsedComposition): Promise<Buffer | null
     blocksSinceYield += 1;
     if (blocksSinceYield >= YIELD_EVERY_BLOCKS) {
       blocksSinceYield = 0;
-      // eslint-disable-next-line no-await-in-loop
+
       await new Promise((resolve) => { setImmediate(resolve); });
     }
   }

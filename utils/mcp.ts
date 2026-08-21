@@ -172,42 +172,6 @@ export async function listSearchTools(): Promise<McpToolDefinition[]> {
   }
 }
 
-// Gemini's Schema type expects uppercase type names ("STRING", "OBJECT"...) and
-// rejects some JSON Schema fields like $schema/additionalProperties.
-function toGeminiSchema(s: any): any {
-  if (!s || typeof s !== 'object') return s;
-  const out: any = { ...s };
-  if (typeof out.type === 'string') out.type = out.type.toUpperCase();
-  if (out.properties && typeof out.properties === 'object') {
-    const newProps: Record<string, any> = {};
-    for (const [k, v] of Object.entries(out.properties)) {
-      newProps[k] = toGeminiSchema(v);
-    }
-    out.properties = newProps;
-  }
-  if (out.items) out.items = toGeminiSchema(out.items);
-  delete out.$schema;
-  delete out.additionalProperties;
-  return out;
-}
-
-export async function listSearchToolsGemini(): Promise<{ functionDeclarations: any[] }[]> {
-  try {
-    const sanitized = await listSanitizedTools();
-    if (sanitized.length === 0) return [];
-    return [{
-      functionDeclarations: sanitized.map((t) => ({
-        name: t.publicName,
-        description: t.description,
-        parameters: toGeminiSchema(t.parameters),
-      })),
-    }];
-  } catch (err) {
-    logError('[mcp] listSearchToolsGemini failed:', err);
-    return [];
-  }
-}
-
 export async function callSearchTool(name: string, args: Record<string, any>): Promise<McpCallResult> {
   try {
     await connect();

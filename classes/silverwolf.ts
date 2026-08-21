@@ -338,8 +338,10 @@ All wrongs reserved.
 
         // Create a copy of the commands array
         const guildCommandValues = Array.from(this.commands.values());
-        // eslint-disable-next-line max-len
-        const guildValidCommands = guildCommandValues.filter((command: any) => command !== null && command.isSubcommandOf === null);
+
+        const guildValidCommands = guildCommandValues.filter(
+          (command: any) => command !== null && command.isSubcommandOf === null,
+        );
         const commandsArray = guildValidCommands.map((command: any) => command.toJSON());
 
         // If there are no blacklisted commands, register all commands

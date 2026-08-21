@@ -70,9 +70,9 @@ class Execute extends DevCommand {
     interaction.commandName = commandName;
 
     const options: any = {
-      // eslint-disable-next-line no-unused-vars
+
       getInteger: (_arg: string) => null,
-      // eslint-disable-next-line no-unused-vars
+
       getString: (_arg: string) => null,
     };
 

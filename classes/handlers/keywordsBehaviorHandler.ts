@@ -150,7 +150,6 @@ const scriptHandlers = {
     }
 
     for (const notice of [...pdfNotices, ...mediaNotices]) {
-      // eslint-disable-next-line no-await-in-loop
       await message.reply({ content: notice, allowedMentions: { repliedUser: false } })
         .catch((e) => { logError('Attachment notice reply failed:', e); });
     }
@@ -186,7 +185,7 @@ const scriptHandlers = {
 
     log(`Prompt: ${prompt}`);
 
-    const avatarURL = persona.avatarURL || message.client.user!.displayAvatarURL();
+    const avatarURL = persona.avatarURL || message.client.user.displayAvatarURL();
 
     let aiSession = null;
     let history: any[] = [];
@@ -388,7 +387,7 @@ const scriptHandlers = {
       );
       componentsForFirstMessage.push(replyButton);
 
-      const sentInitial = await webhook!.send({
+      const sentInitial = await webhook.send({
         content: currentChunk || (filesToAttach.length > 0 ? '' : '(no content)'),
         username: displayName,
         avatarURL,
@@ -427,8 +426,7 @@ const scriptHandlers = {
         );
         componentsForFollowUp.push(previousButton);
 
-        // eslint-disable-next-line no-await-in-loop
-        const sent = await webhook!.send({
+        const sent = await webhook.send({
           content: currentChunk,
           username: displayName,
           avatarURL,
@@ -468,7 +466,6 @@ const scriptHandlers = {
             // text so chronological order is preserved. These rows are audit-only;
             // they're filtered out when history is replayed to the model.
             for (const tc of toolCalls) {
-              // eslint-disable-next-line no-await-in-loop
               await (message.client as any).db.aiChat.addHistory(
                 aiSession.sessionId,
                 'tool',

@@ -1,5 +1,5 @@
 // CLI subprocess entrypoint: process.exit is the contract with the parent.
-/* eslint-disable no-process-exit */
+
 import { extractText, getDocumentProxy } from 'unpdf';
 
 const MAX_COMBINED_PDF_BYTES = 10 * 1024 * 1024;
@@ -86,7 +86,10 @@ async function extractOne(att: AttachmentInfo): Promise<{ block?: string; notice
     return { notice: `Couldn't read **${name}** (encrypted or corrupt) — skipping it.` };
   } finally {
     if (doc) {
-      try { await doc.destroy(); } catch { /* best-effort */ }
+      // unpdf 1.8 moved teardown from the document to its loading task; this
+      // tears down the pdf.js worker as well, which the old doc.destroy() left
+      // running.
+      try { await doc.loadingTask.destroy(); } catch { /* best-effort */ }
     }
     doc = null;
     pdfBytes = null;
@@ -125,7 +128,7 @@ async function handle(input: WorkerInput): Promise<WorkerOutput> {
   for (const att of candidates) {
     if (cumulative + att.size > MAX_COMBINED_PDF_BYTES) {
       notices.push(`Skipped **${att.name}** — combined PDF size would exceed 10 MB.`);
-      // eslint-disable-next-line no-continue
+
       continue;
     }
     accepted.push(att);
@@ -134,7 +137,6 @@ async function handle(input: WorkerInput): Promise<WorkerOutput> {
 
   const blocks: string[] = [];
   for (const att of accepted) {
-    // eslint-disable-next-line no-await-in-loop
     const r = await extractOne(att);
     if (r.block) blocks.push(r.block);
     if (r.notice) notices.push(r.notice);
@@ -153,14 +155,17 @@ async function main(): Promise<void> {
     input = JSON.parse(inputJson);
   } catch {
     process.stdout.write(JSON.stringify({ error: 'invalid input json' }));
+    // eslint-disable-next-line n/no-process-exit
     process.exit(1);
   }
   try {
     const out = await handle(input);
     process.stdout.write(JSON.stringify(out));
+    // eslint-disable-next-line n/no-process-exit
     process.exit(0);
   } catch (err) {
     process.stdout.write(JSON.stringify({ error: (err as Error).message || 'unknown error' }));
+    // eslint-disable-next-line n/no-process-exit
     process.exit(1);
   }
 }

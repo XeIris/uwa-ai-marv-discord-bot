@@ -43,8 +43,8 @@ function isDev(interaction: ChatInputCommandInteraction): boolean {
 }
 
 function isAdmin(interaction: ChatInputCommandInteraction): boolean {
-  // eslint-disable-next-line max-len
-  return (interaction.member?.permissions as PermissionsBitField)?.has(PermissionsBitField.Flags.Administrator) || isDev(interaction);
+  return (interaction.member?.permissions as PermissionsBitField)
+    ?.has(PermissionsBitField.Flags.Administrator) || isDev(interaction);
 }
 
 function isBasement(interaction: ChatInputCommandInteraction): boolean {

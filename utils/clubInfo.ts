@@ -155,46 +155,6 @@ export function clubToolDefs(): any[] {
   ];
 }
 
-export function clubGeminiDecls(): any[] {
-  return [
-    {
-      name: CONSTITUTION_TOOL_NAME,
-      description: CONSTITUTION_DESCRIPTION,
-      parameters: { type: 'OBJECT', properties: {} },
-    },
-    {
-      name: COMMITTEE_TOOL_NAME,
-      description: COMMITTEE_DESCRIPTION,
-      parameters: {
-        type: 'OBJECT',
-        properties: {
-          query: {
-            type: 'STRING',
-            description: 'Optional case-insensitive filter on role title or name (e.g. "treasurer").',
-          },
-        },
-      },
-    },
-    {
-      name: EVENTS_TOOL_NAME,
-      description: EVENTS_DESCRIPTION,
-      parameters: {
-        type: 'OBJECT',
-        properties: {
-          include_past: {
-            type: 'BOOLEAN',
-            description: 'Include events that have already finished. Defaults to false.',
-          },
-          limit: {
-            type: 'INTEGER',
-            description: `Maximum events to return (1-${EVENTS_MAX_LIMIT}). Defaults to ${EVENTS_DEFAULT_LIMIT}.`,
-          },
-        },
-      },
-    },
-  ];
-}
-
 /** System-prompt note advertising the club tools (kept tiny — the detail is in the tool descriptions). */
 export function buildClubNote(club?: ClubContext): string {
   if (!club) return '';

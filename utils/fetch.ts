@@ -19,7 +19,6 @@ async function fetchMessagesByCount(
       options.before = lastId;
     }
 
-    // eslint-disable-next-line no-await-in-loop
     const fetchedMessages: Collection<string, Message> = await channel.messages.fetch(options);
 
     if (fetchedMessages.size === 0) {
@@ -50,13 +49,13 @@ async function fetchMessagesByTime(
   let lastId: string | undefined;
 
   while (messages.length < maxMessages) {
-    // eslint-disable-next-line max-len
-    const options: { limit: number; before?: string } = { limit: Math.min(maxMessages - messages.length, MAX_FETCH_COUNT) };
+    const options: { limit: number; before?: string } = {
+      limit: Math.min(maxMessages - messages.length, MAX_FETCH_COUNT),
+    };
     if (lastId) {
       options.before = lastId;
     }
 
-    // eslint-disable-next-line no-await-in-loop
     let fetchedMessages: Collection<string, Message> = await channel.messages.fetch(options);
     if (fetchedMessages.size === 0) {
       log(`No more messages to fetch. Total messages: ${messages.length}`);

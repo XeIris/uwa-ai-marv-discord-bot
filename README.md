@@ -32,7 +32,7 @@ bun run fetch:soundfont   # optional: GM soundfont for the music generator
 ```
 
 Create a `.env` file. See [`.env.example`](.env.example) for the keys (Discord `TOKEN` +
-`CLIENT_ID`, `GEMINI_TOKEN` / `OPENROUTER_API_KEY`, `ALLOWED_USERS`). Bun loads `.env`
+`CLIENT_ID`, `OPENROUTER_API_KEY`, `ALLOWED_USERS`). Bun loads `.env`
 automatically.
 
 ## Run

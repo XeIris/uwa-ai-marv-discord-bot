@@ -145,7 +145,6 @@ export class EventScheduler {
     this.running = true;
     try {
       for (const kind of Object.keys(WINDOWS) as ReminderKind[]) {
-        // eslint-disable-next-line no-await-in-loop
         await this.sweep(kind, now);
       }
       await this.sweepDirectMessages(now);
@@ -173,7 +172,6 @@ export class EventScheduler {
     if (due.length === 0) return;
 
     for (const event of due) {
-      // eslint-disable-next-line no-await-in-loop
       await this.remind(kind, event, now);
     }
   }
@@ -226,13 +224,12 @@ export class EventScheduler {
     let delivered = 0;
     for (const channelId of channelIds) {
       try {
-        // eslint-disable-next-line no-await-in-loop
         const channel = await this.client.channels.fetch(channelId);
         if (!channel?.isTextBased?.()) {
           log(`[events] reminder channel ${channelId} in guild ${event.serverId} is not text-based; skipping`);
           continue;
         }
-        // eslint-disable-next-line no-await-in-loop
+
         await channel.send({ embeds: [embed] });
         delivered += 1;
       } catch (err) {
@@ -279,13 +276,11 @@ export class EventScheduler {
 
     let sent = 0;
     for (const reminder of due) {
-      // eslint-disable-next-line no-await-in-loop
       const delivered = await this.sendReminderDm(reminder, now);
       if (delivered) {
         sent += 1;
         // Space out real sends only — skipped/stale rows cost no rate limit.
         if (sent < due.length) {
-          // eslint-disable-next-line no-await-in-loop
           await new Promise((resolve) => { setTimeout(resolve, DM_STAGGER_MS); });
         }
       }
@@ -362,11 +357,10 @@ export class EventScheduler {
 
     let delivered = 0;
     for (const notice of due) {
-      // eslint-disable-next-line no-await-in-loop
       const sent = await this.deliverNotice(notice, now);
       if (sent) {
         delivered += 1;
-        // eslint-disable-next-line no-await-in-loop
+
         await new Promise((resolve) => { setTimeout(resolve, DM_STAGGER_MS); });
       }
     }
@@ -423,10 +417,9 @@ export class EventScheduler {
     let delivered = 0;
     for (const channelId of channelIds) {
       try {
-        // eslint-disable-next-line no-await-in-loop
         const channel = await this.client.channels.fetch(channelId);
         if (!channel?.isTextBased?.()) continue;
-        // eslint-disable-next-line no-await-in-loop
+
         await channel.send({ embeds: [embed] });
         delivered += 1;
       } catch (err) {
