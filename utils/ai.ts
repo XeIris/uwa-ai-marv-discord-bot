@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import { OpenAI } from 'openai';
 import mime from 'mime';
 import type Database from '../database/Database';
@@ -68,7 +68,7 @@ import {
 // Note: Bun automatically reads .env files
 
 // Initialize AI providers
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_TOKEN!);
+const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_TOKEN! });
 
 const openrouter = new OpenAI({
   baseURL: 'https://openrouter.ai/api/v1',
@@ -825,25 +825,23 @@ ${systemPrompt || ''}
     const useTools = geminiTools.length > 0;
     const toolNote = searchToolNote + imageGenNote + musicGenNote + diagramGenNote + clubNote;
 
-    const modelClientOptions: any = {
-      model: currentGeminiModel,
-    };
+    // @google/genai carries these on a per-session (or per-request) `config`
+    // rather than baking them into a model client up front.
+    const geminiConfig: any = {};
 
     if (shouldUseSystemInstruction) {
-      modelClientOptions.systemInstruction = systemPrompt + toolNote;
+      geminiConfig.systemInstruction = systemPrompt + toolNote;
     }
     if (useTools) {
-      modelClientOptions.tools = geminiTools;
+      geminiConfig.tools = geminiTools;
     }
     if (musicGen && !isImageModel) {
       // Mirror the OpenRouter composing budget: generate_music arguments are a
       // large composition JSON that can truncate under the model's default
-      // output cap. The SDK only takes generationConfig per model/chat session,
-      // so the raised cap applies to the whole music-enabled session.
-      modelClientOptions.generationConfig = { maxOutputTokens: 32768 };
+      // output cap. The cap is set on the session config, so it applies to the
+      // whole music-enabled session.
+      geminiConfig.maxOutputTokens = 32768;
     }
-
-    const modelClient = genAI.getGenerativeModel(modelClientOptions);
 
     // Map DB history rows → Gemini SDK format ({ role: 'user'|'model', parts: [{text}] }).
     // 'assistant' (from openrouter turns) is normalized to 'model'; 'tool' rows are dropped.
@@ -861,7 +859,11 @@ ${systemPrompt || ''}
 
     // For non-image models: use startChat with history, then sendMessage (with tool loop if enabled)
     if (!isImageModel) {
-      const chatSession = modelClient.startChat({ history: geminiHistory });
+      const chatSession = genAI.chats.create({
+        model: currentGeminiModel,
+        config: geminiConfig,
+        history: geminiHistory,
+      });
       const toolCalls: ToolCallRecord[] = [];
       const generatedImages: ImageAttachment[] = [];
       // generate_music is rejected until get_music_guide has been read in a
@@ -869,18 +871,15 @@ ${systemPrompt || ''}
       let musicGuideRead = false;
       let diagramGuideRead = false;
 
-      let result = await chatSession.sendMessage(processedPrompt);
+      let response = await chatSession.sendMessage({ message: processedPrompt });
       let fullText = '';
 
       for (let iter = 0; iter < MAX_TOOL_ITERATIONS + 1; iter += 1) {
-        const response = await result.response;
         if (response.usageMetadata) {
           totalPromptTokens += response.usageMetadata.promptTokenCount ?? 0;
           totalCompletionTokens += response.usageMetadata.candidatesTokenCount ?? 0;
         }
-        const fnCalls = typeof response.functionCalls === 'function'
-          ? (response.functionCalls() ?? [])
-          : [];
+        const fnCalls = response.functionCalls ?? [];
 
         if (iter === MAX_TOOL_ITERATIONS && fnCalls.length > 0) {
           fullText = 'Tool budget exhausted — the assistant could not complete the request. Try again or simplify the request.';
@@ -888,7 +887,7 @@ ${systemPrompt || ''}
         }
 
         if (!useTools || fnCalls.length === 0) {
-          try { fullText = response.text(); } catch { fullText = ''; }
+          fullText = response.text ?? '';
           break;
         }
 
@@ -1030,7 +1029,7 @@ ${systemPrompt || ''}
         }
 
         // eslint-disable-next-line no-await-in-loop
-        result = await chatSession.sendMessage(fnResponses);
+        response = await chatSession.sendMessage({ message: fnResponses });
       }
 
       if (db && userId && (totalPromptTokens > 0 || totalCompletionTokens > 0)) {
@@ -1051,26 +1050,30 @@ ${systemPrompt || ''}
       },
     ];
 
-    const generateContentStreamOptions: any = {
-      contents,
-    };
+    const streamConfig: any = { ...geminiConfig };
 
     if (currentGeminiModel === 'gemini-2.0-flash-preview-image-generation') {
-      generateContentStreamOptions.generationConfig = {
-        responseModalities: ['IMAGE', 'TEXT'],
-      };
+      streamConfig.responseModalities = ['IMAGE', 'TEXT'];
     }
 
-    const resultObject = await modelClient.generateContentStream(
-      generateContentStreamOptions,
-    );
+    const resultObject = await genAI.models.generateContentStream({
+      model: currentGeminiModel,
+      contents,
+      config: streamConfig,
+    });
 
     let fullText = '';
     const imageAttachments: ImageAttachment[] = [];
     let fileIndex = 0;
 
+    // generateContentStream now resolves to the async iterable directly, rather
+    // than to a { stream, response } pair.
+    let streamUsage: any = null;
     // eslint-disable-next-line no-restricted-syntax
-    for await (const chunk of resultObject.stream) {
+    for await (const chunk of resultObject) {
+      // There is no aggregated final response to read usage from any more, so
+      // keep the last chunk that carried it — Gemini reports cumulative totals.
+      if (chunk.usageMetadata) streamUsage = chunk.usageMetadata;
       if (chunk.candidates?.[0]?.content?.parts) {
         // eslint-disable-next-line no-loop-func
         chunk.candidates[0].content.parts.forEach((part: any) => {
@@ -1089,14 +1092,9 @@ ${systemPrompt || ''}
         });
       }
     }
-    try {
-      const finalResponse = await resultObject.response;
-      if (finalResponse.usageMetadata) {
-        totalPromptTokens = finalResponse.usageMetadata.promptTokenCount ?? 0;
-        totalCompletionTokens = finalResponse.usageMetadata.candidatesTokenCount ?? 0;
-      }
-    } catch {
-      // Ignored
+    if (streamUsage) {
+      totalPromptTokens = streamUsage.promptTokenCount ?? 0;
+      totalCompletionTokens = streamUsage.candidatesTokenCount ?? 0;
     }
     if (db && userId && (totalPromptTokens > 0 || totalCompletionTokens > 0)) {
       try {
@@ -1168,7 +1166,7 @@ async function generateContent(opts: GenerateContentOptions): Promise<GenerateCo
 /**
  * Gets the Gemini AI instance for direct usage
  */
-function getGeminiAI(): GoogleGenerativeAI {
+function getGeminiAI(): GoogleGenAI {
   return genAI;
 }
 
@@ -1291,12 +1289,12 @@ async function generateSessionTitle(conversation: string): Promise<string | null
       } as any, { timeoutMs: 60_000 });
       raw = completion.choices?.[0]?.message?.content ?? null;
     } else if (persona.provider === 'gemini') {
-      const model = genAI.getGenerativeModel({
+      const result = await genAI.models.generateContent({
         model: persona.model,
-        systemInstruction: systemPrompt,
+        contents: userContent,
+        config: { systemInstruction: systemPrompt },
       });
-      const result = await model.generateContent(userContent);
-      raw = result.response.text();
+      raw = result.text ?? null;
     } else {
       logError(`TitleGen: unsupported provider "${persona.provider}"`);
       return null;

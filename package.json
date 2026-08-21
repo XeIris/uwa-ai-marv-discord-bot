@@ -24,7 +24,7 @@
   "author": "",
   "license": "UNLICENSED",
   "dependencies": {
-    "@google/generative-ai": "^0.16.1",
+    "@google/genai": "^2.18.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@resvg/resvg-wasm": "^2.6.2",
     "discord.js": "^14.27.0",

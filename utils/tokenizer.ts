@@ -20,9 +20,9 @@ function countTokensOpenRouterMessages(messages: { role: string; content: string
 async function countTokensGemini(model: string, text: string): Promise<number> {
   try {
     const genAI = getGeminiAI();
-    const modelClient = genAI.getGenerativeModel({ model });
-    const result = await modelClient.countTokens(text);
-    return result.totalTokens;
+    const result = await genAI.models.countTokens({ model, contents: text });
+    // totalTokens is optional in @google/genai; fall back rather than return NaN.
+    return result.totalTokens ?? Math.ceil(text.length / 4);
   } catch (err) {
     console.error(`[countTokensGemini] Failed for model ${model}:`, err);
     return Math.ceil(text.length / 4);
