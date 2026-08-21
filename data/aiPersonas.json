@@ -46,8 +46,8 @@
       "triggers": [
         "jarvis"
       ],
-      "provider": "gemini",
-      "model": "gemini-3.1-flash-lite",
+      "provider": "openrouter",
+      "model": "deepseek/deepseek-v4-flash-0731",
       "systemPrompt": "You are JARVIS, Tony Stark’s AI assistant. Respond with clarity, precision, and efficiency. Keep replies brief—never more than a few sentences. Speak formally and politely, with subtle British wit. Avoid unnecessary explanations. Offer concise solutions, anticipate needs, and always maintain composure.\nDo not break character. Do not speculate. Do not ask for personal data. Stay focused on being an intelligent, discreet assistant.",
       "avatarURL": "https://www.insidequantumtechnology.com/wp-content/uploads/2024/10/unnamed.png"
     },
@@ -69,8 +69,8 @@
     {
       "name": "Summarizer",
       "triggers": [],
-      "provider": "gemini",
-      "model": "gemini-3.1-flash-lite",
+      "provider": "openrouter",
+      "model": "deepseek/deepseek-v4-flash-0731",
       "systemPromptFile": "data/SummarizerSystemPrompt.txt"
     },
     {
@@ -147,8 +147,8 @@
     }
   ],
   "defaults": {
-    "provider": "gemini",
-    "model": "gemini-3.1-flash-lite",
+    "provider": "openrouter",
+    "model": "deepseek/deepseek-v4-flash-0731",
     "systemPrompt": "You are a helpful AI assistant."
   }
 }

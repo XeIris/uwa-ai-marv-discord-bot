@@ -130,31 +130,6 @@ export function diagramToolDefs(): any[] {
   ];
 }
 
-export function diagramGeminiDecls(): any[] {
-  return [
-    {
-      name: DIAGRAM_GUIDE_TOOL_NAME,
-      description: GUIDE_TOOL_DESCRIPTION,
-      parameters: { type: 'OBJECT', properties: {} },
-    },
-    {
-      name: DIAGRAM_GEN_TOOL_NAME,
-      description: GEN_TOOL_DESCRIPTION,
-      parameters: {
-        type: 'OBJECT',
-        properties: {
-          title: { type: 'STRING', description: 'Short title for the diagram (used as the file name).' },
-          format: { type: 'STRING', enum: ['html', 'svg'], description: FORMAT_DESCRIPTION },
-          source: { type: 'STRING', description: SOURCE_DESCRIPTION },
-          width: { type: 'INTEGER', description: `Image width in pixels (${MIN_WIDTH}-${MAX_WIDTH}).` },
-          height: { type: 'INTEGER', description: `Image height in pixels (${MIN_HEIGHT}-${MAX_HEIGHT}). Omit to fit content.` },
-        },
-        required: ['format', 'source'],
-      },
-    },
-  ];
-}
-
 /** System-prompt note advertising the diagram tools (kept tiny — details live in the guide). */
 export function buildDiagramGenNote(diagramGen?: DiagramGenContext): string {
   if (!diagramGen) return '';

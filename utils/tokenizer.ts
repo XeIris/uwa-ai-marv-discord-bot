@@ -1,5 +1,5 @@
 // eslint-disable-next-line import-x/no-cycle -- see the note in utils/ai.ts
-import { formatHistoryEntryForModel, formatMessageWithTimestamp, getGeminiAI } from './ai';
+import { formatHistoryEntryForModel, formatMessageWithTimestamp } from './ai';
 import { getCalibrationMultiplier } from './tokenCalibration';
 
 // Cheap char-based estimate. ~10–20% off on English, worse on code/CJK, but
@@ -18,26 +18,6 @@ function countTokensOpenRouterMessages(messages: { role: string; content: string
   return total;
 }
 
-async function countTokensGemini(model: string, text: string): Promise<number> {
-  try {
-    const genAI = getGeminiAI();
-    const result = await genAI.models.countTokens({ model, contents: text });
-    // totalTokens is optional in @google/genai; fall back rather than return NaN.
-    return result.totalTokens ?? Math.ceil(text.length / 4);
-  } catch (err) {
-    console.error(`[countTokensGemini] Failed for model ${model}:`, err);
-    return Math.ceil(text.length / 4);
-  }
-}
-
-async function countTokensGeminiMessages(
-  model: string,
-  messages: { role: string; message: string }[],
-): Promise<number> {
-  const combined = messages.map((m) => m.message).join('\n');
-  return countTokensGemini(model, combined);
-}
-
 // Provider-agnostic token counter for history
 export interface TokenBudget {
   maxTokens: number;
@@ -53,9 +33,6 @@ export interface ContextWarning {
 }
 
 const CONTEXT_LIMITS: Record<string, number> = {
-  // Gemini models
-  'gemini-3.1-flash-lite': 1_000_000,
-  'gemini-2.0-flash-preview-image-generation': 8_192,
   // OpenRouter models
   // Calibration further narrows the effective budget based on real usage.
   'nvidia/nemotron-3-ultra-550b-a55b:free': 1_000_000,
@@ -110,18 +87,8 @@ async function trimHistoryToFit(
   const calibration = provider === 'openrouter' ? getCalibrationMultiplier(model) : 1.0;
   const availableForHistory = Math.floor(rawAvailable / calibration);
 
-  let systemTokens: number;
-  let promptTokens: number;
-
-  if (provider === 'gemini') {
-    [systemTokens, promptTokens] = await Promise.all([
-      countTokensGemini(model, systemPrompt),
-      countTokensGemini(model, stampedNewPrompt),
-    ]);
-  } else {
-    systemTokens = countTokensOpenRouter(systemPrompt) + 4;
-    promptTokens = countTokensOpenRouter(stampedNewPrompt) + 4;
-  }
+  const systemTokens = countTokensOpenRouter(systemPrompt) + 4;
+  const promptTokens = countTokensOpenRouter(stampedNewPrompt) + 4;
 
   const fixedTokens = systemTokens + promptTokens;
   const budgetForHistory = Math.max(0, availableForHistory - fixedTokens);
@@ -133,16 +100,9 @@ async function trimHistoryToFit(
   }
 
   // Count tokens for each history message and trim from oldest
-  let messageCosts: number[];
-  if (provider === 'gemini') {
-    messageCosts = await Promise.all(
-      history.map((msg) => countTokensGemini(model, formatHistoryEntryForModel(msg))),
-    );
-  } else {
-    messageCosts = history.map(
-      (msg) => countTokensOpenRouter(formatHistoryEntryForModel(msg)) + 4,
-    );
-  }
+  const messageCosts = history.map(
+    (msg) => countTokensOpenRouter(formatHistoryEntryForModel(msg)) + 4,
+  );
 
   // Trim from the start (oldest) until we fit
   let totalHistoryTokens = messageCosts.reduce((a, b) => a + b, 0);
@@ -192,8 +152,6 @@ async function trimHistoryToFit(
 export {
   countTokensOpenRouter,
   countTokensOpenRouterMessages,
-  countTokensGemini,
-  countTokensGeminiMessages,
   getContextLimit,
   trimHistoryToFit,
 };

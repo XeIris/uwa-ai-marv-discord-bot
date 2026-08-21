@@ -224,14 +224,6 @@ export function sheetToolDefs(): any[] {
   }));
 }
 
-export function sheetGeminiDecls(): any[] {
-  return SHEETS.map((sheet) => ({
-    name: sheet.toolName,
-    description: sheet.description,
-    parameters: { type: 'OBJECT', properties: {} },
-  }));
-}
-
 /** System-prompt note advertising the sheets (kept tiny — detail is in the tool descriptions). */
 export function buildSheetsNote(): string {
   return `\n\nReference sheets you can read: ${SHEET_TOOL_NAMES.join(', ')}. These are the ONLY source for club `

@@ -105,35 +105,6 @@ export function imageGenToolDef(ctx?: Pick<ImageGenContext, 'selfPortrait'>): Im
   };
 }
 
-export function imageGenGeminiDecl(
-  ctx?: Pick<ImageGenContext, 'selfPortrait'>,
-): { name: string; description: string; parameters: any } {
-  return {
-    name: IMAGE_GEN_TOOL_NAME,
-    description: TOOL_DESCRIPTION,
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        prompt: {
-          type: 'STRING',
-          description: 'A detailed description of the image to generate, or of the edit to apply.',
-        },
-        use_attached_images: {
-          type: 'BOOLEAN',
-          description: USE_ATTACHED_DESCRIPTION,
-        },
-        ...(ctx?.selfPortrait ? {
-          use_self_portrait: {
-            type: 'BOOLEAN',
-            description: USE_SELF_PORTRAIT_DESCRIPTION,
-          },
-        } : {}),
-      },
-      required: ['prompt'],
-    },
-  };
-}
-
 let cachedSelfPortraitPart: any = null;
 let selfPortraitLoadFailed = false;
 

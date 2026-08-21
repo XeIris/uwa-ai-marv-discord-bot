@@ -105,28 +105,6 @@ export function musicToolDefs(): any[] {
   ];
 }
 
-export function musicGeminiDecls(): any[] {
-  return [
-    {
-      name: MUSIC_GUIDE_TOOL_NAME,
-      description: GUIDE_TOOL_DESCRIPTION,
-      parameters: { type: 'OBJECT', properties: {} },
-    },
-    {
-      name: MUSIC_GEN_TOOL_NAME,
-      description: GEN_TOOL_DESCRIPTION,
-      parameters: {
-        type: 'OBJECT',
-        properties: {
-          title: { type: 'STRING', description: 'Short title for the piece (used as the file name).' },
-          composition: { type: 'STRING', description: COMPOSITION_ARG_DESCRIPTION },
-        },
-        required: ['composition'],
-      },
-    },
-  ];
-}
-
 /** System-prompt note advertising the music tools (kept tiny — details live in the guide). */
 export function buildMusicGenNote(musicGen?: MusicGenContext): string {
   if (!musicGen) return '';

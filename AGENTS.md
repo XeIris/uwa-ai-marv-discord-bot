@@ -43,7 +43,12 @@ is required and pinned — see `.claude/rules/deploy.md` for the places the vers
   file a fresh global if you suspect cross-file state.
 - `bun run lint` / `lint:fix` — ESLint 10, flat config in `eslint.config.mjs`
   (airbnb-extended + n + promise + typescript-eslint).
-- `bun run typecheck` — `tsc --noEmit`.
+- `bun run typecheck` — `tsc --noEmit`, on **TypeScript 7** (the Go compiler).
+  TS 7 dropped the programmatic API, which typescript-eslint still needs, so the two run
+  side-by-side per Microsoft's guidance: `@typescript/native` is an alias for `typescript@7`
+  and supplies `tsc`, while the `typescript` name is aliased to `@typescript/typescript6` so
+  library importers get the 6.0 API (and `tsc6` if you want it). Collapse this back to a plain
+  `typescript` dependency once typescript-eslint supports 7.1's new API.
 - `bun run fetch:soundfont` — download the GM soundfont for the JAYDON music generator.
 - `bun run fetch:fonts` — download the fonts for the diagram renderer (DejaVu) and the welcome
   card (Bruno Ace).

@@ -24,11 +24,9 @@
   "author": "",
   "license": "UNLICENSED",
   "dependencies": {
-    "@google/genai": "^2.18.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@resvg/resvg-wasm": "^2.6.2",
     "discord.js": "^14.27.0",
-    "mime": "^4",
     "openai": "^7",
     "satori": "^0.33",
     "spessasynth_core": "^4.3.20",
@@ -37,12 +35,13 @@
   "devDependencies": {
     "@types/bun": "^1.4.0",
     "@types/node": "^26",
+    "@typescript/native": "npm:typescript@^7.0.2",
     "eslint": "^10",
     "eslint-config-airbnb-extended": "^3.2.0",
     "eslint-plugin-n": "^18.3.0",
     "eslint-plugin-promise": "^7",
     "globals": "^17.11.0",
-    "typescript": "^6.0.3",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "^8.67.0"
   },
   "overrides": {

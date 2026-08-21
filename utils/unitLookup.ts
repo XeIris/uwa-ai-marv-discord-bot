@@ -51,18 +51,6 @@ export function unitToolDef(): any {
   };
 }
 
-export function unitGeminiDecl(): any {
-  return {
-    name: UNIT_TOOL_NAME,
-    description: TOOL_DESCRIPTION,
-    parameters: {
-      type: 'OBJECT',
-      properties: { code: { type: 'STRING', description: CODE_DESCRIPTION } },
-      required: ['code'],
-    },
-  };
-}
-
 /** System-prompt note advertising the unit tool. */
 export function buildUnitNote(): string {
   return `\n\nYou can look up any UWA unit by code with ${UNIT_TOOL_NAME} (e.g. CITS3001). Use it instead of `
