@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { Collection } from 'discord.js';
+import { getDocumentProxy, extractText } from 'unpdf';
 import { extractPdfsFromMessage } from '../../utils/pdf';
 
 const WORKER = `${import.meta.dir}/../../utils/pdf.worker.ts`;
@@ -104,5 +105,55 @@ describe('extractPdfsFromMessage', () => {
     const result = await extractPdfsFromMessage(message);
     expect(result.blocks).toEqual([]);
     expect(result.notices[0]).toContain('untrusted source');
+  });
+});
+
+/**
+ * The worker only ever fetches from Discord's CDN, so nothing above actually
+ * parses a PDF — which is how the unpdf 1.6 -> 1.8 bump nearly shipped a leak.
+ * `PDFDocumentProxy.destroy()` was removed in the pdf.js that 1.8 vendors, and
+ * the worker's teardown call sits inside a best-effort `catch`, so the resulting
+ * throw would have been swallowed and leaked a pdf.js worker per PDF.
+ *
+ * These pin the two bits of unpdf the worker actually leans on.
+ */
+function buildTinyPdf(text: string): Uint8Array {
+  const objs: (string | null)[] = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 4 0 R '
+      + '/Resources << /Font << /F1 5 0 R >> >> >>',
+    null,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  const stream = `BT /F1 12 Tf 10 50 Td (${text}) Tj ET`;
+  objs[3] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+
+  let pdf = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  objs.forEach((body, i) => {
+    offsets.push(pdf.length);
+    pdf += `${i + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xref = pdf.length;
+  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  offsets.forEach((o) => { pdf += `${String(o).padStart(10, '0')} 00000 n \n`; });
+  pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new TextEncoder().encode(pdf);
+}
+
+describe('unpdf contract the worker depends on', () => {
+  test('extracts text from a real document', async () => {
+    const doc = await getDocumentProxy(buildTinyPdf('Hello Marv'));
+    const { text } = await extractText(doc, { mergePages: true });
+    expect(text.trim()).toBe('Hello Marv');
+    await doc.loadingTask.destroy();
+  });
+
+  test('teardown is reachable and actually tears down', async () => {
+    const doc = await getDocumentProxy(buildTinyPdf('Teardown'));
+    // The exact call utils/pdf.worker.ts makes in its finally block.
+    await doc.loadingTask.destroy();
+    expect(doc.loadingTask.destroyed).toBe(true);
   });
 });

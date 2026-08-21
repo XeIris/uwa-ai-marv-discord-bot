@@ -86,7 +86,10 @@ async function extractOne(att: AttachmentInfo): Promise<{ block?: string; notice
     return { notice: `Couldn't read **${name}** (encrypted or corrupt) — skipping it.` };
   } finally {
     if (doc) {
-      try { await doc.destroy(); } catch { /* best-effort */ }
+      // unpdf 1.8 moved teardown from the document to its loading task; this
+      // tears down the pdf.js worker as well, which the old doc.destroy() left
+      // running.
+      try { await doc.loadingTask.destroy(); } catch { /* best-effort */ }
     }
     doc = null;
     pdfBytes = null;
