@@ -49,17 +49,23 @@ class AiChatModel {
    * Creates a brand-new active session for a user+persona pair.
    * Deactivates any existing active sessions for that persona first.
    */
-  async startNewSession(userId: string, personaName: string): Promise<Record<string, any> | null> {
+  async startNewSession(userId: string, personaName: string): Promise<Record<string, any>> {
     const newSessionId = await this.db.executeTransaction(async (rawDb: any) => {
       rawDb.query(aiChatQueries.END_ALL_USER_PERSONA_SESSIONS).run(userId, personaName);
       rawDb.query(aiChatQueries.START_SESSION).run(userId, personaName);
       return rawDb.query('SELECT last_insert_rowid() as id').get().id;
     });
 
+    // Non-null by contract. The row is committed by the time we read it back, so
+    // a miss is an infrastructure fault rather than an empty result — and the
+    // old nullable return made callers report "couldn't start a session" for a
+    // session that *had* been created, sending the user into a retry that opens
+    // yet another one. Throwing keeps the two states honest.
     const session = await this.getSessionById(newSessionId);
-    if (session) {
-      log(`AiChat: Started new session ${session.sessionId} for user ${userId} with persona ${personaName}`);
+    if (!session) {
+      throw new Error(`AiChat: session ${newSessionId} could not be read back immediately after insert`);
     }
+    log(`AiChat: Started new session ${session.sessionId} for user ${userId} with persona ${personaName}`);
     return session;
   }
 

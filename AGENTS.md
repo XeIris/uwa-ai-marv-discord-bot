@@ -123,7 +123,7 @@ per-guild `CommandConfig` blacklist.
 a global `banned` kill-switch. `DevCommand` enforces `isDev` before running.
 
 **Events** (wired in `classes/silverwolf.ts`): `messageCreate` → the single AI keyword trigger
-(`marv` → `keywordsBehaviorHandler`); `interactionCreate` → command dispatch +
+(`marv`/`asimarv` → `keywordsBehaviorHandler`); `interactionCreate` → command dispatch +
 autocomplete; `guildMemberAdd` → the join welcome card (`welcomeHandler`, off unless the guild
 sets `welcome_channels`); message delete/edit tracked for history.
 

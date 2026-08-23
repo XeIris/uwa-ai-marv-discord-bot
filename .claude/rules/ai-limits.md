@@ -27,7 +27,9 @@ it moves.** Two rules that don't move: unlisted models are 1x/1x, and listed pro
 are ignored (multipliers track list price).
 
 Models in `FREE_MODELS` (`openrouter/free`, which `TitleGen` runs on) are 0x/0x **and** skip the
-reservation entirely — free to run, so never metered or blocked.
+reservation entirely — free to run, so they never consume credits and can't be blocked by credit
+exhaustion. That exemption is about **price only**: the consent gate sits upstream of model choice
+and still fails closed, so a free model is no route around `ensureAiConsent`.
 
 The multiplier and `CONTEXT_LIMITS` tables are keyed by **model id, not persona**, and deliberately
 still list models no configured persona uses — they're a reference for whatever a persona is pointed
