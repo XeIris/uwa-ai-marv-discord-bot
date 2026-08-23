@@ -2,6 +2,8 @@
 paths:
   - "utils/ai.ts"
   - "utils/aiPricing.ts"
+  - "utils/aiModeration.ts"
+  - "utils/aiSessionLock.ts"
   - "utils/llmRetry.ts"
   - "utils/aiConsent.ts"
   - "commands/ai*.ts"
@@ -11,7 +13,7 @@ paths:
   - "database/models/AiConsentModel.ts"
 ---
 
-# AI usage limits, routing, consent & retry
+# AI usage limits, routing, moderation, consent & retry
 
 `utils/ai.ts`, `utils/aiPricing.ts`, `AiUsageModel`.
 
@@ -80,6 +82,78 @@ is the one place thinking pays for itself.
 DeepSeek at 0.5x/1x, which is generous against what price-sorted routing actually costs. Real spend
 is therefore *below* what `AiUsage.cost` records; that column is an upper bound, and it also ignores
 provider-side prompt caching.
+
+## Content-safety moderation
+
+Off by default; `GlobalConfig.ai_moderation = 1` turns it on globally (`utils/aiModeration.ts`).
+When on, **every** session-backed AI turn — every persona, every user, no exemptions — is screened
+twice by the `Moderation` persona (`data/aiPersonas.json`, an NVIDIA Nemotron content-safety
+classifier that takes **no system prompt**): once on the user message before generating, once on the
+user+assistant pair before delivery. Its reply is plain-text labels (`User Safety:` /
+`Response Safety:` / `Safety Categories:`), parsed by `parseModerationOutput`.
+
+A trip sets `AiChatSession.moderation_flagged` (`flagSessionModeration`) — the session is paused
+permanently, `active` deliberately untouched so `getOrCreateSession` keeps returning and refusing
+it. The turn is neither delivered nor persisted; the user gets `MODERATION_PAUSED_MESSAGE` and must
+start a new chat (`-n`). `/summary` is sessionless and reply-and-drops with
+`MODERATION_BLOCKED_MESSAGE` instead.
+
+**The screen never costs credits.** It calls `createChatCompletionWithRetry` directly, bypassing
+`generateContent` — so no `tryReserve`, no `addUsage`, no entry in the credit ledger at all. **Don't
+route it through `generateContent`** — that would start billing users for being moderated.
+
+**The screen fails open** — an outage, timeout, or unparseable label logs and allows the turn. A
+free classifier must never be able to take down every conversation on the bot. Budgets are tight for
+the same reason (15s per attempt, 20s overall): the screen runs twice per turn and sits on the
+critical path, so a degraded classifier must fail open fast rather than stall the reply.
+
+The mention handler (`keywordsBehaviorHandler`) is the only media-capable surface; `/summary` is
+text-only.
+
+### Attached images
+
+The classifier is `text+image`, so the mention handler's **pre-screen** sends the user's attached
+images alongside their caption (`moderateExchange(text, undefined, imageParts)`), reusing the
+buffers `aiMedia` already downloaded — no second fetch. It screens the **sender's own** images,
+whether the persona's model reads them as vision parts or they were collected only as
+`generate_image` edit sources. `selectModerationImages` drops video/audio (the classifier takes
+neither) and caps the count at `aiMedia`'s `MAX_IMAGES` — **never cap it lower**, or an extra
+attachment becomes an unscreened gap.
+
+Images from the *replied-to* message are **not** pre-screened, for the same reason `ownTurnText`
+excludes quoted text — they are excluded from `moderationImageParts` while still flowing into
+`mediaParts`/`imageEditParts`. What the model *says* about them is still caught by the output text
+screen, and anything `generate_image` produces from them by `moderateGeneratedImages`.
+
+Images ride the **inbound pass only**: they are a multi-MB base64 upload on the critical path under
+a 15s timeout, and `Response Safety` turns on the assistant's text, not on a picture the inbound
+pass already ruled on. If the model rejects the images (400/413/415/422 or an image/vision error)
+the screen retries once text-only before failing open.
+
+### Generated images
+
+The output pass screens the *prompts* the model passed to `generate_image`/`generate_music` as part
+of the reply text. That is not the same as screening the picture, so `moderateGeneratedImages`
+screens the returned bytes too, after the text pass and only on turns that actually generated an
+image (≤ `IMAGE_GEN_DAILY_LIMIT` per user per day). `generatedImagePart` derives the MIME from the
+filename `runImageGeneration` built out of the provider's own data URL, and returns null for anything
+that isn't an image — `generate_music`'s WAV rides the same attachment list.
+
+The bytes go in as the **user** turn (the only position the classifier accepts images in), so the
+reply says `User Safety`, and `moderateGeneratedImages` re-attributes it to `flaggedSide:
+'response'` — it is our output whatever the label says. **Don't "fix" that to `'user'`.**
+
+### Known limits
+
+- **Video and audio are not screened.** The classifier takes text and images only, so an attached
+  video or voice message reaches a media-capable persona unscreened, and the WAV from
+  `generate_music` goes out unscreened (only its prompt and title are).
+- **A post-screen trip still costs credits** on every surface — generation has already happened by
+  then. The pre-screen exists to make that the uncommon case.
+- **Only the user's own text and images are screened for the pause decision** (`ownTurnText`), not
+  the quoted reply context, its attached images, or attached PDF bodies — screening those would let
+  someone permanently pause a third party's session just by being quoted at. Content induced *by*
+  quoted context is still caught by the output screen.
 
 ## Consent gate
 

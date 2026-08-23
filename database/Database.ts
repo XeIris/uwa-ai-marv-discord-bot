@@ -124,12 +124,14 @@ class Database {
             active INTEGER DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             title TEXT DEFAULT NULL,
-            source TEXT NOT NULL DEFAULT 'discord'
+            source TEXT NOT NULL DEFAULT 'discord',
+            moderation_flagged INTEGER NOT NULL DEFAULT 0,
+            moderation_categories TEXT DEFAULT NULL
           )
         `);
         this.db.run(`
-          INSERT INTO AiChatSession_new (session_id, user_id, persona_name, active, created_at, title, source)
-          SELECT session_id, user_id, persona_name, active, created_at, title, source FROM AiChatSession
+          INSERT INTO AiChatSession_new (session_id, user_id, persona_name, active, created_at, title, source, moderation_flagged, moderation_categories)
+          SELECT session_id, user_id, persona_name, active, created_at, title, source, moderation_flagged, moderation_categories FROM AiChatSession
         `);
         this.db.run('DROP TABLE AiChatSession');
         this.db.run('ALTER TABLE AiChatSession_new RENAME TO AiChatSession');

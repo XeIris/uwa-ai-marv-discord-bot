@@ -7,6 +7,7 @@ export const GLOBAL_CONFIG_KEYS = {
   ALLOWED_SERVERS: 'allowed_servers',
   BIRTHDAY_CHANNELS: 'birthday_channels',
   FOOTBALL_CHANNELS: 'football_channels',
+  AI_MODERATION: 'ai_moderation',
 } as const;
 
 export const GLOBAL_CHANNEL_LIST_KEYS = [
@@ -57,6 +58,11 @@ export const DOCUMENTED_GLOBAL_CONFIG_KEYS: {
     description: 'Channels that receive World Cup match announcements',
     defaultValue: 'none',
   },
+  {
+    key: GLOBAL_CONFIG_KEYS.AI_MODERATION,
+    description: 'Content-safety screening of AI chats. 0 = off, 1 = on (flagged chats are paused)',
+    defaultValue: '0',
+  },
 ];
 
 /** Keys managed via `/globalconfig set` (not list keys managed by register commands). */
@@ -68,6 +74,7 @@ export const SETTABLE_GLOBAL_VALUE_KEYS = DOCUMENTED_GLOBAL_CONFIG_KEYS.filter(
 const BOOLEAN_VALUE_KEYS = new Set<string>([
   GLOBAL_CONFIG_KEYS.FOOTBALL,
   GLOBAL_CONFIG_KEYS.BANNED,
+  GLOBAL_CONFIG_KEYS.AI_MODERATION,
 ]);
 
 const DOCUMENTED_KEY_SET = new Set<string>(DOCUMENTED_GLOBAL_CONFIG_KEYS.map((entry) => entry.key));

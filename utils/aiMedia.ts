@@ -20,6 +20,7 @@ const FETCH_TIMEOUT_MS = Number(process.env.DISCORD_FETCH_TIMEOUT_MS) || 15_000;
 // Per-request caps. Sizes are checked against Discord's attachment metadata
 // BEFORE downloading, so an oversized file never costs a single byte.
 const MAX_IMAGES = 5;
+export { MAX_IMAGES };
 const MAX_VIDEOS = 1;
 const MAX_AUDIO = 1;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -91,6 +92,13 @@ export interface MediaCollectionResult {
   parts: any[];
   /** Modality of each entry in `parts` (index-aligned with `parts`/`placeholders`). */
   kinds: MediaKind[];
+  /**
+   * Whether each entry came from the replied-to message rather than the sender's
+   * own (index-aligned). Content-safety pre-screening uses this to judge only
+   * what the sender themselves attached — see `ownTurnText` in
+   * `keywordsBehaviorHandler`.
+   */
+  fromReply: boolean[];
   /** Text placeholders for the stored prompt, e.g. "[attached image: cat.png]". */
   placeholders: string[];
   /** User-facing notes about skipped/failed attachments. */
@@ -177,6 +185,7 @@ export async function collectMediaFromMessage(
 ): Promise<MediaCollectionResult> {
   const parts: any[] = [];
   const kinds: MediaKind[] = [];
+  const fromReplyFlags: boolean[] = [];
   const placeholders: string[] = [];
   const notices: string[] = [];
 
@@ -211,11 +220,13 @@ export async function collectMediaFromMessage(
 
   if (candidates.length === 0 && skippedUnsupported === 0) {
     return {
-      parts, kinds, placeholders, notices,
+      parts, kinds, fromReply: fromReplyFlags, placeholders, notices,
     };
   }
 
-  for (const { att, kind, mime } of candidates) {
+  for (const {
+    att, kind, mime, fromReply,
+  } of candidates) {
     if (counts[kind] >= maxCounts[kind]) {
       skippedOverCount[kind] += 1;
       continue;
@@ -253,6 +264,7 @@ export async function collectMediaFromMessage(
       parts.push({ type: 'input_audio', input_audio: { data: b64, format: AUDIO_TYPES[mime] || 'mp3' } });
     }
     kinds.push(kind);
+    fromReplyFlags.push(fromReply);
     placeholders.push(`[attached ${kind}: ${att.name || 'file'}]`);
   }
 
@@ -271,6 +283,6 @@ export async function collectMediaFromMessage(
   }
 
   return {
-    parts, kinds, placeholders, notices,
+    parts, kinds, fromReply: fromReplyFlags, placeholders, notices,
   };
 }

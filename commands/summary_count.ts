@@ -1,6 +1,7 @@
 import { EmbedBuilder } from 'discord.js';
 import { Command } from './classes/Command';
 import { generateContent, getPersonaByName } from '../utils/ai';
+import { isModerationEnabled, moderateExchange, MODERATION_BLOCKED_MESSAGE } from '../utils/aiModeration';
 import { log, logError } from '../utils/log';
 import { handleRateLimitError } from '../utils/discordRateLimit';
 import { ensureAiConsent } from '../utils/aiConsent';
@@ -90,6 +91,16 @@ class Summary extends Command {
       logError('Failed to generate summary:', error);
       await interaction.editReply('Failed to generate summary. Please try again later.');
       return;
+    }
+
+    // Content-safety screen. /summary is a one-shot with no session to pause,
+    // so a trip is reply-and-drop: the summary is discarded, nothing persists.
+    if (await isModerationEnabled(this.client.db)) {
+      const verdict = await moderateExchange(content, summary.text);
+      if (!verdict.safe) {
+        await interaction.editReply(MODERATION_BLOCKED_MESSAGE);
+        return;
+      }
     }
 
     const chunks = splitForEmbed(summary.text);

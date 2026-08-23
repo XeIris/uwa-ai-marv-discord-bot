@@ -36,6 +36,12 @@ personaName)`, `db.aiUsage.addUsage(...)`.
   an enum, so sessions belonging to retired personas (Grok, GPT, …) survive the persona being
   deleted from `data/aiPersonas.json` — they stay readable and deletable in `/ai view` /
   `/ai chatdelete` but nothing can write to them again.
+  **Moderation pause:** `AiChatSession.moderation_flagged` (0/1) + `moderation_categories` (audit
+  string) mark a session paused by the content-safety screen — `active` stays 1 so the session is
+  still returned and refused rather than silently replaced. `ADD_HISTORY` is a conditional INSERT
+  (`… WHERE EXISTS (SELECT 1 FROM AiChatSession WHERE session_id = ? AND moderation_flagged = 0)`),
+  so the check and the write are one statement and a turn that was mid-generation when another turn
+  paused the session cannot persist into it. See `.claude/rules/ai-limits.md`.
 - **AI consent:** `AiConsent` (`db.aiConsent`) — one row per user recording which version of the
   data notice they accepted; absence means no consent and no generation. See
   `.claude/rules/ai-limits.md`.
