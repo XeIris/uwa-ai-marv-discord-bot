@@ -150,10 +150,14 @@ reply says `User Safety`, and `moderateGeneratedImages` re-attributes it to `fla
   `generate_music` goes out unscreened (only its prompt and title are).
 - **A post-screen trip still costs credits** on every surface — generation has already happened by
   then. The pre-screen exists to make that the uncommon case.
-- **Only the user's own text and images are screened for the pause decision** (`ownTurnText`), not
-  the quoted reply context, its attached images, or attached PDF bodies — screening those would let
-  someone permanently pause a third party's session just by being quoted at. Content induced *by*
-  quoted context is still caught by the output screen.
+- **Only the user's own text, images and PDF attachments are screened for the pause decision**
+  (`ownTurnText`, which now prefixes the extracted PDF text) — not the quoted reply context or its
+  attached images. Screening *those* would let someone permanently pause a third party's session
+  just by being quoted at. Content induced *by* quoted context is still caught by the output screen.
+- **The full text is screened, not a truncated prefix.** `chunkText` splits input and output into
+  `MAX_SCREENED_CHARS`-sized chunks and `moderateExchange` screens each one, so content past the
+  first 8,000 chars can't slip through to the provider or into the delivered reply. Long inputs
+  (e.g. a `/summary` of hundreds of messages) therefore cost one classifier call per chunk.
 
 ## Consent gate
 

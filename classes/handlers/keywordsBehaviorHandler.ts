@@ -234,13 +234,16 @@ const scriptHandlers = {
         prompt = `${pdfPrefix}${metaPrefix}User ${username} said: ${query}${mediaSuffix}`;
       }
 
-      // What the *user themselves* wrote, with no quoted reply context and no PDF
-      // body. This — not `prompt` — is what the content-safety screen judges for
-      // the purpose of pausing: `prompt` embeds another user's message when this
-      // is a reply, so screening it would let someone permanently pause a third
-      // party's session just by being quoted at. The model's reply is still
-      // post-screened, which is where content induced by quoted context surfaces.
-      const ownTurnText = `User ${username} said: ${query}`;
+      // What the *user themselves* wrote, plus the text of any PDFs they
+      // attached. This — not `prompt` — is what the content-safety screen judges
+      // for the purpose of pausing: `prompt` embeds another user's message when
+      // this is a reply, so screening it would let someone permanently pause a
+      // third party's session just by being quoted at. The user's own PDF text
+      // is *theirs*, not a third party's, so it is screened inbound — a benign
+      // query over an unsafe attached PDF must not reach the model. The model's
+      // reply is still post-screened, which is where content induced by quoted
+      // context surfaces.
+      const ownTurnText = `${pdfPrefix}User ${username} said: ${query}`;
 
       log(`Prompt: ${prompt}`);
 

@@ -48,8 +48,13 @@ export const MODERATION_BLOCKED_MESSAGE = 'safety filters blocked this response.
 /** Persona in data/aiPersonas.json holding the classifier's provider + model. */
 const MODERATION_PERSONA = 'Moderation';
 
-/** The classifier only needs enough text to judge; long PDFs/transcripts are cut. */
-const MAX_SCREENED_CHARS = 8000;
+/**
+ * Per-call cap on how much text goes to the classifier. Content longer than
+ * this is split into chunks and each chunk is screened separately, so text past
+ * this cut still gets judged rather than sliding through a truncate-the-prefix
+ * behaviour unscreened.
+ */
+export const MAX_SCREENED_CHARS = 8000;
 
 /**
  * How many attached images go to the classifier. Deliberately equal to
@@ -97,9 +102,19 @@ export async function isModerationEnabled(db: Database | undefined | null): Prom
   }
 }
 
-function truncate(text: string): string {
+/**
+ * Splits text into `MAX_SCREENED_CHARS`-sized chunks so the classifier judges
+ * the whole exchange, not just the first chunk. Empty/whitespace-only input
+ * yields no chunks.
+ */
+export function chunkText(text: string): string[] {
   const trimmed = (text ?? '').toString().trim();
-  return trimmed.length > MAX_SCREENED_CHARS ? trimmed.slice(0, MAX_SCREENED_CHARS) : trimmed;
+  if (!trimmed) return [];
+  const chunks: string[] = [];
+  for (let i = 0; i < trimmed.length; i += MAX_SCREENED_CHARS) {
+    chunks.push(trimmed.slice(i, i + MAX_SCREENED_CHARS));
+  }
+  return chunks;
 }
 
 /**
@@ -209,10 +224,10 @@ export async function moderateExchange(
   assistantText?: string,
   imageParts: any[] = [],
 ): Promise<ModerationVerdict> {
-  const userContent = truncate(userText);
-  const assistantContent = truncate(assistantText ?? '');
   const images = selectModerationImages(imageParts);
-  if (!userContent && !assistantContent && images.length === 0) return SAFE_VERDICT;
+  const userChunks = chunkText(userText);
+  const assistantChunks = chunkText(assistantText ?? '');
+  if (userChunks.length === 0 && assistantChunks.length === 0 && images.length === 0) return SAFE_VERDICT;
 
   // Everything that can throw — the persona lookup/hydration, the classifier
   // call, the image-rejection fallback — lives inside this try so a failure
@@ -234,13 +249,7 @@ export async function moderateExchange(
     }
 
     // No system prompt — the classifier's chat template supplies its own.
-    const runScreen = async (withImages: any[]): Promise<string> => {
-      const messages: { role: 'user' | 'assistant'; content: any }[] = [
-        { role: 'user', content: buildModerationUserContent(userContent, withImages) },
-      ];
-      if (assistantContent) {
-        messages.push({ role: 'assistant', content: assistantContent });
-      }
+    const screenOnce = async (messages: { role: 'user' | 'assistant'; content: any }[]): Promise<string> => {
       const completion = await createChatCompletionWithRetry(getOpenRouterClient(), {
         model: persona.model,
         messages,
@@ -252,29 +261,67 @@ export async function moderateExchange(
       return completion.choices?.[0]?.message?.content ?? '';
     };
 
-    let rawOutput: string;
-    try {
-      rawOutput = await runScreen(images);
-    } catch (err: any) {
-      // Text-only fallback only helps if there is text to judge; with none, the
-      // outer catch fails the screen open as usual.
-      if (images.length === 0 || !(userContent || assistantContent) || !isImageRejection(err)) throw err;
-      logWarning(`[moderation] classifier rejected ${images.length} attached image(s); re-screening text only: ${err?.message ?? err}`);
-      rawOutput = await runScreen([]);
+    // Classifies one (user, assistant) chunk pair. The user turn carries the
+    // images when present; on an image rejection the pair is retried once
+    // text-only so a vision regression degrades to caption-only, not no screen.
+    const classify = async (
+      userChunk: string,
+      assistantChunk: string,
+      withImages: any[],
+    ): Promise<ModerationVerdict> => {
+      const build = (imgs: any[]) => {
+        const messages: { role: 'user' | 'assistant'; content: any }[] = [
+          { role: 'user', content: buildModerationUserContent(userChunk, imgs) },
+        ];
+        if (assistantChunk) {
+          messages.push({ role: 'assistant', content: assistantChunk });
+        }
+        return messages;
+      };
+      let rawOutput: string;
+      try {
+        rawOutput = await screenOnce(build(withImages));
+      } catch (err: any) {
+        if (withImages.length === 0 || !(userChunk || assistantChunk) || !isImageRejection(err)) throw err;
+        logWarning(`[moderation] classifier rejected ${withImages.length} attached image(s); re-screening text only: ${err?.message ?? err}`);
+        rawOutput = await screenOnce(build([]));
+      }
+      const verdict = parseModerationOutput(rawOutput);
+      // A non-empty reply with no label means a truncated or malformed
+      // classification (e.g. a reasoning trace that ate the whole token budget).
+      // That fails open by design — but silently, so say so.
+      if (rawOutput.trim() && !/User Safety\s*:/i.test(stripThinking(rawOutput))) {
+        logWarning('[moderation] classifier returned no recognisable label; failing open');
+      }
+      return verdict;
+    };
+
+    if (assistantChunks.length === 0) {
+      // Pre-screen: every user chunk must pass before generation; the attached
+      // images ride the first chunk (the caption sits at the head of the text).
+      for (let i = 0; i < userChunks.length; i += 1) {
+        const verdict = await classify(userChunks[i], '', i === 0 ? images : []);
+        if (!verdict.safe) {
+          log(`[moderation] flagged ${verdict.flaggedSide} turn${verdict.categories ? ` (${verdict.categories})` : ''}`);
+          return verdict;
+        }
+      }
+      return SAFE_VERDICT;
     }
-    const verdict = parseModerationOutput(rawOutput);
-    // A non-empty reply with no label means a truncated or malformed
-    // classification (e.g. a reasoning trace that ate the whole token budget).
-    // That fails open by design — but silently, so say so. Test the *cleaned*
-    // output: a label quoted inside a `<think>` preamble is not a verdict, and
-    // testing the raw text would let it suppress this warning.
-    if (rawOutput.trim() && !/User Safety\s*:/i.test(stripThinking(rawOutput))) {
-      logWarning('[moderation] classifier returned no recognisable label; failing open');
+
+    // Post-screen: the user text was already screened inbound, so the job here
+    // is the output. Each output chunk is judged with the (first chunk of the)
+    // prompt as context — supplying it avoids the empty-user-content shape some
+    // providers reject.
+    const context = userChunks[0] ?? '';
+    for (let i = 0; i < assistantChunks.length; i += 1) {
+      const verdict = await classify(context, assistantChunks[i], []);
+      if (!verdict.safe) {
+        log(`[moderation] flagged ${verdict.flaggedSide} turn${verdict.categories ? ` (${verdict.categories})` : ''}`);
+        return verdict;
+      }
     }
-    if (!verdict.safe) {
-      log(`[moderation] flagged ${verdict.flaggedSide} turn${verdict.categories ? ` (${verdict.categories})` : ''}`);
-    }
-    return verdict;
+    return SAFE_VERDICT;
   } catch (err) {
     logError('[moderation] screen failed; allowing the turn through:', err);
     return SAFE_VERDICT;

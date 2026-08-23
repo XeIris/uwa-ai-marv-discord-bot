@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildModerationUserContent,
+  chunkText,
   generatedImagePart,
+  MAX_SCREENED_CHARS,
   parseModerationOutput,
   selectModerationImages,
 } from '../../utils/aiModeration';
@@ -144,6 +146,31 @@ describe('generatedImagePart', () => {
   test('skips empty buffers and nameless files', () => {
     expect(generatedImagePart({ attachment: Buffer.alloc(0), name: 'imgen-1.png' })).toBeNull();
     expect(generatedImagePart({ attachment: bytes, name: '' })).toBeNull();
+  });
+});
+
+describe('chunkText', () => {
+  test('returns no chunks for empty or whitespace-only input', () => {
+    expect(chunkText('')).toEqual([]);
+    expect(chunkText('   ')).toEqual([]);
+  });
+
+  test('returns a single chunk when under the cap', () => {
+    expect(chunkText('hello')).toEqual(['hello']);
+  });
+
+  test('splits long text into cap-sized chunks and reassembles losslessly', () => {
+    const long = 'x'.repeat(MAX_SCREENED_CHARS * 2 + 5);
+    const chunks = chunkText(long);
+    expect(chunks).toHaveLength(3);
+    expect(chunks[0]).toHaveLength(MAX_SCREENED_CHARS);
+    expect(chunks[1]).toHaveLength(MAX_SCREENED_CHARS);
+    expect(chunks[2]).toHaveLength(5);
+    expect(chunks.join('')).toBe(long);
+  });
+
+  test('trims surrounding whitespace before chunking', () => {
+    expect(chunkText('  hi  ')).toEqual(['hi']);
   });
 });
 
