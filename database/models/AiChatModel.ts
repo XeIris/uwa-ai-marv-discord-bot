@@ -1,7 +1,10 @@
 import { stripModelTimestampPrefix } from '../../utils/ai';
-import { log } from '../../utils/log';
+import { log, logError } from '../../utils/log';
 import aiChatQueries from '../queries/aiChatQueries';
 import type Database from '../Database';
+
+/** Audit field, not a control value — long enough for the full category list. */
+const MAX_MODERATION_CATEGORY_CHARS = 500;
 
 /** Model for managing per-user, per-persona AI chat sessions and history. */
 class AiChatModel {
@@ -148,6 +151,39 @@ class AiChatModel {
   }
 
   /**
+   * Marks a session as paused by the content-safety screen. Idempotent; the
+   * session keeps its `active` flag so the user can still read the history and
+   * so `getOrCreateSession` keeps returning it (and keeps refusing).
+   *
+   * Returns whether the pause actually persisted. `executeQuery` swallows DB
+   * errors and reports `changes: 0` rather than throwing, so a caller that
+   * assumed success would tell the user the chat was paused while leaving the
+   * row unflagged — and the very next message would generate normally.
+   */
+  async flagSessionModeration(sessionId: number, categories?: string | null): Promise<boolean> {
+    const id = Math.trunc(Number(sessionId));
+    if (!Number.isFinite(id) || !Number.isInteger(id) || id <= 0) {
+      logError(`AiChat: refusing to flag invalid session id ${String(sessionId)}`);
+      return false;
+    }
+    // Categories are free-form classifier output stored for audit only; trim and
+    // cap rather than whitelisting, since the model's taxonomy is its own and a
+    // new category label should be recorded, not silently dropped.
+    const trimmed = categories?.trim().slice(0, MAX_MODERATION_CATEGORY_CHARS) || null;
+
+    const result = await this.db.executeQuery(
+      aiChatQueries.FLAG_SESSION_MODERATION,
+      [trimmed, id],
+    );
+    if (Number(result.changes ?? 0) !== 1) {
+      logError(`AiChat: failed to persist content-safety pause for session ${id} (no row changed)`);
+      return false;
+    }
+    log(`AiChat: Session ${id} paused by content-safety screen${trimmed ? ` (${trimmed})` : ''}`);
+    return true;
+  }
+
+  /**
    * Switches the active session for a user/persona to a specific session.
    * Deactivates all current sessions for that user/persona first, then activates the target.
    */
@@ -180,12 +216,21 @@ class AiChatModel {
 
   /**
    * Appends a message to the session's history.
+   *
+   * No-ops when the session has been paused by the content-safety screen — the
+   * guard lives in the INSERT itself, so a turn that was already generating when
+   * another turn paused the session cannot write into it. Returns whether the
+   * row was written.
    */
-  async addHistory(sessionId: number, role: 'user' | 'model' | 'assistant' | 'tool', message: string): Promise<void> {
+  async addHistory(sessionId: number, role: 'user' | 'model' | 'assistant' | 'tool', message: string): Promise<boolean> {
     const stored = role === 'model' || role === 'assistant'
       ? stripModelTimestampPrefix(message)
       : message;
-    await this.db.executeQuery(aiChatQueries.ADD_HISTORY, [sessionId, role, stored]);
+    const result = await this.db.executeQuery(
+      aiChatQueries.ADD_HISTORY,
+      [sessionId, role, stored, sessionId],
+    );
+    return Number(result.changes ?? 0) > 0;
   }
 
   /**

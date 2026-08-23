@@ -26,7 +26,7 @@ duplicate their content here.
 | Working on | Loads |
 | ------ | ------ |
 | `database/**` | `.claude/rules/database.md` — DAO layering, transactions, settings tables |
-| `utils/ai.ts`, `utils/aiPricing.ts`, `utils/llmRetry.ts`, `utils/aiConsent.ts`, `commands/ai*.ts`, `AiUsageModel` | `.claude/rules/ai-limits.md` — credit metering, model routing, consent gate, retry policy |
+| `utils/ai.ts`, `utils/aiPricing.ts`, `utils/aiModeration.ts`, `utils/aiSessionLock.ts`, `utils/llmRetry.ts`, `utils/aiConsent.ts`, `commands/ai*.ts`, `commands/summary_*.ts`, `AiUsageModel` | `.claude/rules/ai-limits.md` — credit metering, model routing, content-safety moderation, consent gate, retry policy |
 | `commands/committee_*`, `commands/event_*`, `utils/clubInfo.ts`, the club models | `.claude/rules/club-data.md` — roster, events, constitution |
 | `utils/diagramGen.ts`, `data/skills/diagram-guide.md`, `scripts/fetch-fonts.ts` | `.claude/rules/diagrams.md` — render_diagram, markup allowlists |
 | `utils/welcomeCard.ts`, `classes/handlers/welcomeHandler.ts`, `commands/dev_welcome_test.ts` | `.claude/rules/welcome.md` — join welcome card |
@@ -66,8 +66,10 @@ in the DB `GlobalConfig` table and override/augment env.
 **AI features:** keyword-triggered AI chat (say `marv` → the bot replies as itself via
 `classes/handlers/keywordsBehaviorHandler.ts` → `utils/ai.ts`), per-user chat sessions
 (`/ai view|chatnew|chatswitch|chatdelete|retitle|forget`, `AiChatModel`), credit metering (`/ai usage`,
-`AiUsageModel`), AI chat summaries (`/summary count|time`), and the web-search / image-generation /
-music-generation (JAYDON) / diagram-rendering tools that ride along in chat. Personas live in
+`AiUsageModel`), AI chat summaries (`/summary count|time`), the web-search / image-generation /
+music-generation (JAYDON) / diagram-rendering tools that ride along in chat, and opt-in
+content-safety moderation (`ai_moderation` in GlobalConfig, off by default) that screens every turn
+through an NVIDIA Nemotron classifier. Personas live in
 `data/aiPersonas.json` — **Marv is the only invokable one**; `Summarizer`, `Imgen` and `TitleGen`
 are triggerless config records for internal calls, not characters anyone can summon. The former
 third-party personas (Grok, GPT, Jarvis, MiMo, Qwen, Deepseek, FreeRouter) were removed as out of
@@ -154,6 +156,10 @@ separate per-member opt-in needing no guild config) and drains the `EventNotice`
 - **No AI generation without consent.** Every entry point that sends member text to a provider
   calls `ensureAiConsent` (`utils/aiConsent.ts`) first and stops silently if it returns false —
   it fails closed. New AI entry points must be gated too.
+- **AI moderation fails open, never closed.** The content-safety screen (`utils/aiModeration.ts`)
+  is a free classifier that can be down or slow; an outage, timeout, or unparseable label must
+  allow the turn through, never block every conversation on the bot. See
+  `.claude/rules/ai-limits.md`.
 
 ## Gotchas
 

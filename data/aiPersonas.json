@@ -47,6 +47,12 @@
       "provider": "openrouter",
       "model": "openrouter/free",
       "systemPrompt": "Generate a concise title of 5-10 words max summarizing the conversation topic. Output only the raw title text — no quotes, no prefixes, no punctuation at the end. Do not think, reason, plan, or explain. Respond immediately with the title and nothing else."
+    },
+    {
+      "name": "Moderation",
+      "triggers": [],
+      "provider": "openrouter",
+      "model": "nvidia/nemotron-3.5-content-safety:free"
     }
   ],
   "defaults": {

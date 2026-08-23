@@ -12,6 +12,12 @@ export interface AiChatSessionRow {
   // (web never sets active=1, so it can't collide with the bot's per-persona
   // active-session unique index).
   source: string;
+  // 1 once the content-safety screen (utils/aiModeration.ts) rejected a turn in
+  // this session. Permanently pauses it — the session stays active/visible so
+  // the user still sees their history, but no further turns are generated.
+  moderation_flagged: number;
+  /** Comma-separated safety categories from the screen, when it reported any. */
+  moderation_categories: string | null;
 }
 
 const aiChatSessionTable: TableDefinition = {
@@ -24,6 +30,8 @@ const aiChatSessionTable: TableDefinition = {
     { name: 'created_at', type: 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP' },
     { name: 'title', type: 'TEXT DEFAULT NULL' },
     { name: 'source', type: "TEXT NOT NULL DEFAULT 'discord'" },
+    { name: 'moderation_flagged', type: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'moderation_categories', type: 'TEXT DEFAULT NULL' },
   ],
   primaryKey: ['session_id'],
   specialConstraints: [],
