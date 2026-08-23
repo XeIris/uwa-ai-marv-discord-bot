@@ -214,40 +214,44 @@ export async function moderateExchange(
   const images = selectModerationImages(imageParts);
   if (!userContent && !assistantContent && images.length === 0) return SAFE_VERDICT;
 
-  const persona = await getPersonaByName(MODERATION_PERSONA);
-  if (!persona) {
-    logWarning(`[moderation] no "${MODERATION_PERSONA}" persona configured; skipping screen`);
-    return SAFE_VERDICT;
-  }
-  if (persona.provider !== 'openrouter') {
-    logWarning(`[moderation] persona provider "${persona.provider}" unsupported; skipping screen`);
-    return SAFE_VERDICT;
-  }
-  if (!process.env.OPENROUTER_API_KEY) {
-    logWarning('[moderation] OPENROUTER_API_KEY not set; skipping screen');
-    return SAFE_VERDICT;
-  }
-
-  // No system prompt — the classifier's chat template supplies its own.
-  const runScreen = async (withImages: any[]): Promise<string> => {
-    const messages: { role: 'user' | 'assistant'; content: any }[] = [
-      { role: 'user', content: buildModerationUserContent(userContent, withImages) },
-    ];
-    if (assistantContent) {
-      messages.push({ role: 'assistant', content: assistantContent });
-    }
-    const completion = await createChatCompletionWithRetry(getOpenRouterClient(), {
-      model: persona.model,
-      messages,
-      max_tokens: MODERATION_MAX_TOKENS,
-    }, {
-      timeoutMs: MODERATION_TIMEOUT_MS,
-      overallTimeoutMs: MODERATION_OVERALL_TIMEOUT_MS,
-    });
-    return completion.choices?.[0]?.message?.content ?? '';
-  };
-
+  // Everything that can throw — the persona lookup/hydration, the classifier
+  // call, the image-rejection fallback — lives inside this try so a failure
+  // fails open rather than rejecting the caller. A missing persona or a
+  // non-openrouter provider is a normal, logged skip, not an error.
   try {
+    const persona = await getPersonaByName(MODERATION_PERSONA);
+    if (!persona) {
+      logWarning(`[moderation] no "${MODERATION_PERSONA}" persona configured; skipping screen`);
+      return SAFE_VERDICT;
+    }
+    if (persona.provider !== 'openrouter') {
+      logWarning(`[moderation] persona provider "${persona.provider}" unsupported; skipping screen`);
+      return SAFE_VERDICT;
+    }
+    if (!process.env.OPENROUTER_API_KEY) {
+      logWarning('[moderation] OPENROUTER_API_KEY not set; skipping screen');
+      return SAFE_VERDICT;
+    }
+
+    // No system prompt — the classifier's chat template supplies its own.
+    const runScreen = async (withImages: any[]): Promise<string> => {
+      const messages: { role: 'user' | 'assistant'; content: any }[] = [
+        { role: 'user', content: buildModerationUserContent(userContent, withImages) },
+      ];
+      if (assistantContent) {
+        messages.push({ role: 'assistant', content: assistantContent });
+      }
+      const completion = await createChatCompletionWithRetry(getOpenRouterClient(), {
+        model: persona.model,
+        messages,
+        max_tokens: MODERATION_MAX_TOKENS,
+      }, {
+        timeoutMs: MODERATION_TIMEOUT_MS,
+        overallTimeoutMs: MODERATION_OVERALL_TIMEOUT_MS,
+      });
+      return completion.choices?.[0]?.message?.content ?? '';
+    };
+
     let rawOutput: string;
     try {
       rawOutput = await runScreen(images);

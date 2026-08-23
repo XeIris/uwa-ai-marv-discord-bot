@@ -82,6 +82,16 @@ class Summary extends Command {
       persona.systemPrompt = await Bun.file(persona.systemPromptFile).text();
     }
 
+    // Content-safety pre-screen: judge the input before it reaches (or bills)
+    // the provider. One-shot surface, so a trip is reply-and-drop.
+    if (await isModerationEnabled(this.client.db)) {
+      const inbound = await moderateExchange(content);
+      if (!inbound.safe) {
+        await interaction.editReply(MODERATION_BLOCKED_MESSAGE);
+        return;
+      }
+    }
+
     let summary: any;
     try {
       summary = await generateContent({

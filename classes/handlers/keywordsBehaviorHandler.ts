@@ -93,188 +93,200 @@ const scriptHandlers = {
       return;
     }
 
-    const { blocks: pdfBlocks, notices: pdfNotices } = await extractPdfsFromMessage(message);
-
-    // Media (image/video/audio) attachments. Two consumers:
-    //  - vision input (mediaParts → the chat model's user turn): persona-gated
-    //    by the model's own input modalities (mediaInput), openrouter-only;
-    //  - image editing (imageEditParts → the generate_image tool as edit
-    //    sources): any persona with imageGen enabled, images only.
-    // Base64 buffers live in these arrays for the duration of this generation
-    // and are never persisted; only text placeholders enter the prompt/history.
-    let mediaParts: any[] = [];
-    let imageEditParts: any[] = [];
-    // Images the *sender* attached, for the content-safety pre-screen. Same
-    // buffers as above — screening never re-downloads.
-    let moderationImageParts: any[] = [];
-    let mediaPlaceholders: string[] = [];
-    let editOnlyPlaceholders: string[] = [];
-    const mediaNotices: string[] = [];
-    let mediaSlotHeld = false;
-    // Modalities this persona's model can read — Marv's vision route takes
-    // images only. Anything outside this set is collected only if the
-    // generate_image edit path can still use it.
-    const visionKinds = getPersonaMediaKinds(persona);
-    const imageGenEnabled = hasMemory;
-    const collectKinds = [...new Set<MediaKind>([
-      ...visionKinds,
-      ...(imageGenEnabled ? ['image' as MediaKind] : []),
-    ])];
-    const shouldCollectMedia = collectKinds.length > 0
-      && hasQualifyingMedia(message, contextMsg, collectKinds);
-    if (shouldCollectMedia) {
-      if (!tryAcquireMediaSlot()) {
-        mediaNotices.push('⚠ Too many attachment-reading requests in flight right now — answering without your attachments. Try again in a moment.');
-      } else {
-        mediaSlotHeld = true;
-        try {
-          const collected = await collectMediaFromMessage(message, contextMsg, collectKinds);
-          const items = collected.parts.map((part: any, i: number) => ({
-            part,
-            kind: collected.kinds[i],
-            fromReply: collected.fromReply[i],
-            placeholder: collected.placeholders[i],
-          }));
-          // Only the sender's own images, for the same reason `ownTurnText`
-          // drops quoted text: an image pulled in from the replied-to message
-          // isn't theirs, and pausing their session over it would hand anyone a
-          // way to get a conversation killed. The output screen still catches
-          // whatever the model says about it.
-          moderationImageParts = items
-            .filter((m) => m.kind === 'image' && !m.fromReply)
-            .map((m) => m.part);
-          if (imageGenEnabled) {
-            imageEditParts = items.filter((m) => m.kind === 'image').map((m) => m.part);
-          }
-          // Split by what the chat model can actually read.
-          const readable = items.filter((m) => visionKinds.includes(m.kind));
-          const unreadable = items.filter((m) => !visionKinds.includes(m.kind));
-          mediaParts = readable.map((m) => m.part);
-          mediaPlaceholders = readable.map((m) => m.placeholder);
-          // The chat model can't see the rest (always images — nothing else is
-          // collected for a model that can't read it) — placeholders tell it
-          // they exist so it can offer/perform edits via generate_image. Only
-          // IMAGE_EDIT_MAX_SOURCES images are editable (tool hard cap), so with
-          // more the placeholders stay plain and the system note tells the
-          // model to refuse edits.
-          editOnlyPlaceholders = imageEditParts.length <= IMAGE_EDIT_MAX_SOURCES
-            ? unreadable.map(
-              (m) => `${m.placeholder} (you cannot view this image, but your generate_image tool can edit it)`,
-            )
-            : unreadable.map((m) => `${m.placeholder} (you cannot view this image)`);
-          mediaNotices.push(...collected.notices);
-        } catch (mediaErr) {
-          logError('AiChat: media collection failed, proceeding without attachments:', mediaErr);
-          mediaNotices.push('⚠ Couldn\'t process your attachments — answering without them.');
-          mediaParts = [];
-          imageEditParts = [];
-          moderationImageParts = [];
-          mediaPlaceholders = [];
-          editOnlyPlaceholders = [];
-        }
-      }
-    }
-
-    for (const notice of [...pdfNotices, ...mediaNotices]) {
-      await message.reply({ content: notice, allowedMentions: { repliedUser: false } })
-        .catch((e) => { logError('Attachment notice reply failed:', e); });
-    }
-    const pdfPrefix = pdfBlocks.length > 0 ? `${pdfBlocks.join('\n\n')}\n\n` : '';
-    const allPlaceholders = [...mediaPlaceholders, ...editOnlyPlaceholders];
-    const mediaSuffix = allPlaceholders.length > 0 ? `\n${allPlaceholders.join('\n')}` : '';
-
-    // Tag every prompt with who is speaking and what club role they hold, so the
-    // persona knows whether it's talking to the Treasurer or a random member. A
-    // roster lookup failure must never cost us the reply.
-    let speakerTitle = 'Ordinary Member';
-    if (message.guild) {
-      try {
-        const titles = await (message.client as any).db.committee
-          .getTitlesForUser(message.guild.id, message.author.id);
-        if (titles.length > 0) speakerTitle = titles.join(' / ');
-      } catch (titleErr) {
-        logError('Committee: failed to look up speaker title, defaulting to Ordinary Member:', titleErr);
-      }
-    }
-    const metaPrefix = `[${perthDateString()}]-[${speakerTitle}]-[${username}]-`;
-
-    let prompt = '';
-
-    if (contextMsg) {
-      // Replies are the bot's own messages now, so identity is the bot's user
-      // id rather than a webhook username match.
-      const promptName = (contextMsg.author.id === message.client.user?.id) ? 'You' : contextMsg.author.username;
-      prompt = `${pdfPrefix}Previous message by ${promptName}: "${contextMsg.content}"
-
-      ${metaPrefix}User ${username} said: ${query}${mediaSuffix}`;
-    } else {
-      prompt = `${pdfPrefix}${metaPrefix}User ${username} said: ${query}${mediaSuffix}`;
-    }
-
-    // What the *user themselves* wrote, with no quoted reply context and no PDF
-    // body. This — not `prompt` — is what the content-safety screen judges for
-    // the purpose of pausing: `prompt` embeds another user's message when this
-    // is a reply, so screening it would let someone permanently pause a third
-    // party's session just by being quoted at. The model's reply is still
-    // post-screened, which is where content induced by quoted context surfaces.
-    const ownTurnText = `User ${username} said: ${query}`;
-
-    log(`Prompt: ${prompt}`);
-
+    // Resolve the session row before the lock: its id is the lock key. The
+    // history load + trim runs inside the locked turn — it needs the prompt and
+    // the media decision, both computed only after the media slot is acquired.
     let aiSession = null;
-    let history: any[] = [];
-    let historyLoaded = false;
-    let hadRawHistory = false;
-    let contextWarnings: { level: number; message: string; wasTrimmed: boolean; trimmedCount: number }[] = [];
-    // Kept so the text-only fallback below can re-trim from the untrimmed set
-    // rather than from a window budgeted for a different model.
-    let filteredHistory: any[] = [];
     if (hasMemory) {
       try {
         aiSession = await (message.client as any).db.aiChat.getOrCreateSession(
           message.author.id,
           displayName,
         );
-        const rawHistory = await (message.client as any).db.aiChat.getHistory(aiSession.sessionId, 100);
-        hadRawHistory = rawHistory.length > 0;
-
-        // Tool rows are audit-only and get filtered out before replay anyway —
-        // exclude them from the token budget so they don't crowd out real turns.
-        filteredHistory = rawHistory.filter((h: { role: string }) => h.role !== 'tool');
-
-        // Token-based sliding window: trim oldest messages to fit context.
-        // Budgeted against the model this turn will actually run on — a dual-
-        // routed persona's two models can have different context windows, and
-        // the text model's can be the smaller of the two (Marv: 262k on
-        // DeepSeek against 1.05M on the vision route). A vision turn that falls
-        // back to text-only therefore re-trims against the text budget before
-        // retrying; see the catch below.
-        const { trimmedHistory, warnings } = await trimHistoryToFit(
-          persona.provider,
-          resolveTurnModel(persona, mediaParts.length > 0).model,
-          persona.systemPrompt ?? '',
-          filteredHistory,
-          prompt,
-          persona.webSearchEnabled,
-        );
-        history = trimmedHistory;
-        contextWarnings = warnings;
-        historyLoaded = true;
-
-        if (filteredHistory.length !== trimmedHistory.length) {
-          log(`AiChat: Trimmed history from ${filteredHistory.length} to ${trimmedHistory.length} messages for session ${aiSession.sessionId}`);
-        }
-      } catch (histErr) {
-        logError('AiChat: Failed to load history, proceeding without it:', histErr);
+      } catch (sessionErr) {
+        logError('AiChat: Failed to load session, proceeding without memory:', sessionErr);
       }
     }
 
-    // The whole turn — pause check, generation, delivery and history writes —
-    // runs under a per-session lock. Those are separate operations, so without
-    // serialization a concurrent turn could flag the session in between and this
-    // one would still deliver into a paused chat. Memoryless personas have no
-    // session to lock and nothing to persist, so they run unserialized.
+    // The whole turn — media download, prompt build, history load, pause check,
+    // generation, delivery and history writes — runs under a per-session lock.
+    // The media slot and the decoded attachment buffers are held for the whole
+    // generation, so they must not be acquired until the lock is held: a turn
+    // queued behind another on the same session would otherwise pin a global
+    // media slot (and the bytes) for the entire wait. Memoryless personas have
+    // no session to lock and nothing to persist, so they run unserialized.
     const runTurn = async () => {
+      const { blocks: pdfBlocks, notices: pdfNotices } = await extractPdfsFromMessage(message);
+
+      // Media (image/video/audio) attachments. Two consumers:
+      //  - vision input (mediaParts → the chat model's user turn): persona-gated
+      //    by the model's own input modalities (mediaInput), openrouter-only;
+      //  - image editing (imageEditParts → the generate_image tool as edit
+      //    sources): any persona with imageGen enabled, images only.
+      // Base64 buffers live in these arrays for the duration of this generation
+      // and are never persisted; only text placeholders enter the prompt/history.
+      let mediaParts: any[] = [];
+      let imageEditParts: any[] = [];
+      // Images the *sender* attached, for the content-safety pre-screen. Same
+      // buffers as above — screening never re-downloads.
+      let moderationImageParts: any[] = [];
+      let mediaPlaceholders: string[] = [];
+      let editOnlyPlaceholders: string[] = [];
+      const mediaNotices: string[] = [];
+      let mediaSlotHeld = false;
+      // Modalities this persona's model can read — Marv's vision route takes
+      // images only. Anything outside this set is collected only if the
+      // generate_image edit path can still use it.
+      const visionKinds = getPersonaMediaKinds(persona);
+      const imageGenEnabled = hasMemory;
+      const collectKinds = [...new Set<MediaKind>([
+        ...visionKinds,
+        ...(imageGenEnabled ? ['image' as MediaKind] : []),
+      ])];
+      const shouldCollectMedia = collectKinds.length > 0
+      && hasQualifyingMedia(message, contextMsg, collectKinds);
+      if (shouldCollectMedia) {
+        if (!tryAcquireMediaSlot()) {
+          mediaNotices.push('⚠ Too many attachment-reading requests in flight right now — answering without your attachments. Try again in a moment.');
+        } else {
+          mediaSlotHeld = true;
+          try {
+            const collected = await collectMediaFromMessage(message, contextMsg, collectKinds);
+            const items = collected.parts.map((part: any, i: number) => ({
+              part,
+              kind: collected.kinds[i],
+              fromReply: collected.fromReply[i],
+              placeholder: collected.placeholders[i],
+            }));
+            // Only the sender's own images, for the same reason `ownTurnText`
+            // drops quoted text: an image pulled in from the replied-to message
+            // isn't theirs, and pausing their session over it would hand anyone a
+            // way to get a conversation killed. The output screen still catches
+            // whatever the model says about it.
+            moderationImageParts = items
+              .filter((m) => m.kind === 'image' && !m.fromReply)
+              .map((m) => m.part);
+            if (imageGenEnabled) {
+              imageEditParts = items.filter((m) => m.kind === 'image').map((m) => m.part);
+            }
+            // Split by what the chat model can actually read.
+            const readable = items.filter((m) => visionKinds.includes(m.kind));
+            const unreadable = items.filter((m) => !visionKinds.includes(m.kind));
+            mediaParts = readable.map((m) => m.part);
+            mediaPlaceholders = readable.map((m) => m.placeholder);
+            // The chat model can't see the rest (always images — nothing else is
+            // collected for a model that can't read it) — placeholders tell it
+            // they exist so it can offer/perform edits via generate_image. Only
+            // IMAGE_EDIT_MAX_SOURCES images are editable (tool hard cap), so with
+            // more the placeholders stay plain and the system note tells the
+            // model to refuse edits.
+            editOnlyPlaceholders = imageEditParts.length <= IMAGE_EDIT_MAX_SOURCES
+              ? unreadable.map(
+                (m) => `${m.placeholder} (you cannot view this image, but your generate_image tool can edit it)`,
+              )
+              : unreadable.map((m) => `${m.placeholder} (you cannot view this image)`);
+            mediaNotices.push(...collected.notices);
+          } catch (mediaErr) {
+            logError('AiChat: media collection failed, proceeding without attachments:', mediaErr);
+            mediaNotices.push('⚠ Couldn\'t process your attachments — answering without them.');
+            mediaParts = [];
+            imageEditParts = [];
+            moderationImageParts = [];
+            mediaPlaceholders = [];
+            editOnlyPlaceholders = [];
+          }
+        }
+      }
+
+      for (const notice of [...pdfNotices, ...mediaNotices]) {
+        await message.reply({ content: notice, allowedMentions: { repliedUser: false } })
+          .catch((e) => { logError('Attachment notice reply failed:', e); });
+      }
+      const pdfPrefix = pdfBlocks.length > 0 ? `${pdfBlocks.join('\n\n')}\n\n` : '';
+      const allPlaceholders = [...mediaPlaceholders, ...editOnlyPlaceholders];
+      const mediaSuffix = allPlaceholders.length > 0 ? `\n${allPlaceholders.join('\n')}` : '';
+
+      // Tag every prompt with who is speaking and what club role they hold, so the
+      // persona knows whether it's talking to the Treasurer or a random member. A
+      // roster lookup failure must never cost us the reply.
+      let speakerTitle = 'Ordinary Member';
+      if (message.guild) {
+        try {
+          const titles = await (message.client as any).db.committee
+            .getTitlesForUser(message.guild.id, message.author.id);
+          if (titles.length > 0) speakerTitle = titles.join(' / ');
+        } catch (titleErr) {
+          logError('Committee: failed to look up speaker title, defaulting to Ordinary Member:', titleErr);
+        }
+      }
+      const metaPrefix = `[${perthDateString()}]-[${speakerTitle}]-[${username}]-`;
+
+      let prompt = '';
+
+      if (contextMsg) {
+      // Replies are the bot's own messages now, so identity is the bot's user
+      // id rather than a webhook username match.
+        const promptName = (contextMsg.author.id === message.client.user?.id) ? 'You' : contextMsg.author.username;
+        prompt = `${pdfPrefix}Previous message by ${promptName}: "${contextMsg.content}"
+
+      ${metaPrefix}User ${username} said: ${query}${mediaSuffix}`;
+      } else {
+        prompt = `${pdfPrefix}${metaPrefix}User ${username} said: ${query}${mediaSuffix}`;
+      }
+
+      // What the *user themselves* wrote, with no quoted reply context and no PDF
+      // body. This — not `prompt` — is what the content-safety screen judges for
+      // the purpose of pausing: `prompt` embeds another user's message when this
+      // is a reply, so screening it would let someone permanently pause a third
+      // party's session just by being quoted at. The model's reply is still
+      // post-screened, which is where content induced by quoted context surfaces.
+      const ownTurnText = `User ${username} said: ${query}`;
+
+      log(`Prompt: ${prompt}`);
+
+      let history: any[] = [];
+      let historyLoaded = false;
+      let hadRawHistory = false;
+      let contextWarnings: { level: number; message: string; wasTrimmed: boolean; trimmedCount: number }[] = [];
+      // Kept so the text-only fallback below can re-trim from the untrimmed set
+      // rather than from a window budgeted for a different model.
+      let filteredHistory: any[] = [];
+      if (hasMemory && aiSession) {
+        try {
+          const rawHistory = await (message.client as any).db.aiChat.getHistory(aiSession.sessionId, 100);
+          hadRawHistory = rawHistory.length > 0;
+
+          // Tool rows are audit-only and get filtered out before replay anyway —
+          // exclude them from the token budget so they don't crowd out real turns.
+          filteredHistory = rawHistory.filter((h: { role: string }) => h.role !== 'tool');
+
+          // Token-based sliding window: trim oldest messages to fit context.
+          // Budgeted against the model this turn will actually run on — a dual-
+          // routed persona's two models can have different context windows, and
+          // the text model's can be the smaller of the two (Marv: 262k on
+          // DeepSeek against 1.05M on the vision route). A vision turn that falls
+          // back to text-only therefore re-trims against the text budget before
+          // retrying; see the catch below.
+          const { trimmedHistory, warnings } = await trimHistoryToFit(
+            persona.provider,
+            resolveTurnModel(persona, mediaParts.length > 0).model,
+            persona.systemPrompt ?? '',
+            filteredHistory,
+            prompt,
+            persona.webSearchEnabled,
+          );
+          history = trimmedHistory;
+          contextWarnings = warnings;
+          historyLoaded = true;
+
+          if (filteredHistory.length !== trimmedHistory.length) {
+            log(`AiChat: Trimmed history from ${filteredHistory.length} to ${trimmedHistory.length} messages for session ${aiSession.sessionId}`);
+          }
+        } catch (histErr) {
+          logError('AiChat: Failed to load history, proceeding without it:', histErr);
+        }
+      }
+
       // Content-safety gate (global `ai_moderation` switch). Applies to every
       // persona and every user alike. Releases the media slot on every exit —
       // the normal path frees it in the generation `finally` below.
