@@ -32,7 +32,10 @@ personaName)`, `db.aiUsage.addUsage(...)`.
 - **AI chat:** `AiChatSession` + `AiChatHistory` (`db.aiChat`) — one active session per
   user+persona (unique index enforces it, `source='discord'`), history rows are `user`/`assistant`
   (legacy `model` rows from the retired Gemini provider are still normalised on read) plus
-  audit-only `tool` rows that are filtered out on replay.
+  audit-only `tool` rows that are filtered out on replay. `persona_name` is a free-text string, not
+  an enum, so sessions belonging to retired personas (Grok, GPT, …) survive the persona being
+  deleted from `data/aiPersonas.json` — they stay readable and deletable in `/ai view` /
+  `/ai chatdelete` but nothing can write to them again.
 - **AI consent:** `AiConsent` (`db.aiConsent`) — one row per user recording which version of the
   data notice they accepted; absence means no consent and no generation. See
   `.claude/rules/ai-limits.md`.
@@ -40,7 +43,7 @@ personaName)`, `db.aiUsage.addUsage(...)`.
   (`tokens` column stores credits) via `db.aiUsage` — see `.claude/rules/ai-limits.md`.
 - **Per-guild settings:** `ServerConfig` (`db.serverConfig`, keyed by `server_id` + `key`) — named
   roles use `role:<name>` keys; `messageReactsEnabled` gates the AI keyword trigger, so don't make
-  the grok mention reply depend on it silently. `CommandConfig` stays separate, for per-guild
+  the Marv keyword reply depend on it silently. `CommandConfig` stays separate, for per-guild
   command blacklists.
 - **Global:** `GlobalConfig` — allowed servers (`allowed_servers`), the `banned` kill-switch.
   These override/augment the corresponding env vars.

@@ -71,7 +71,7 @@ async function connect(): Promise<void> {
   inflightConnect = (async () => {
     try {
       transport = new StreamableHTTPClientTransport(new URL(EXA_MCP_URL));
-      client = new Client({ name: 'silverwolf', version: '1.0.0' }, { capabilities: {} });
+      client = new Client({ name: 'uwa-ai-marv', version: '1.0.0' }, { capabilities: {} });
 
       transport.onclose = () => {
         if (isShuttingDown) return;

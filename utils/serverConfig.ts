@@ -92,7 +92,7 @@ export const DOCUMENTED_SERVER_CONFIG_KEYS: {
   },
   {
     key: SERVER_CONFIG_KEYS.MESSAGE_REACTS_ENABLED,
-    description: 'Keyword/script replies on messages (e.g. @grok, nya). 0 = off, 1 = on',
+    description: 'Keyword/script replies on messages (the Marv AI trigger). 0 = off, 1 = on',
     defaultValue: '1',
   },
 ];

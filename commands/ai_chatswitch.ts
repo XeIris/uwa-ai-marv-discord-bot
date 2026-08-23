@@ -56,7 +56,7 @@ class AiChatswitch extends Command {
             .setTitle('✅ Session Switched')
             .setDescription(
               `Switched to session **#${sessionId}** (${session.personaName}).\n`
-              + `Mentioning \`@${session.personaName.toLowerCase()}\` will now continue from this conversation.`,
+              + 'Saying `marv` will now continue from this conversation.',
             ),
         ],
       });

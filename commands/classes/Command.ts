@@ -39,15 +39,15 @@ class Command {
     const banned = await this.client.db.globalConfig.getGlobalConfig('banned');
     if (banned === '1' || banned === 'true') {
       if (!isDev(interaction)) {
-        log('ehe banned');
+        log(`Command ${this.name} blocked: global kill-switch is on`);
         const embed = new EmbedBuilder()
           .setColor('Red')
-          .setTitle(`Sorry, ${this.name} isn't available right now.`)
+          .setTitle(`\`/${this.name}\` is temporarily unavailable`)
           .setDescription(
-            `A law banning ${this.name} has been enacted in ${interaction.guild.name}. `
-            + 'Unfortunately, that means you can\'t use this command here.\n\n'
-            + 'We are fortunate that Iruma has indication he will work with us on a solution to '
-            + `reinstate ${this.name} once he is unbanned. Please stay tuned!`,
+            'The bot\'s commands have been paused by its maintainers, usually for '
+            + 'maintenance or to deal with a problem.\n\n'
+            + 'Nothing is wrong on your end and you don\'t need to do anything — '
+            + 'please try again later. Thanks for your patience!',
           );
         await interaction.reply({
           embeds: [embed],
@@ -77,8 +77,8 @@ class Command {
 
       // Inform the user about the error, if needed
       await interaction.editReply({
-        content: 'An error occurred while executing the command.\n'
-        + 'Please try again later or modify the inputs.',
+        content: 'Sorry — something went wrong while running that command. '
+        + 'Please try again in a moment, and check your inputs if it keeps happening.',
       });
     }
   }

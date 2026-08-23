@@ -26,8 +26,12 @@ where $0.28/M = 1x. **The per-model multiplier table lives in `utils/aiPricing.t
 it moves.** Two rules that don't move: unlisted models are 1x/1x, and listed promotional discounts
 are ignored (multipliers track list price).
 
-Models in `FREE_MODELS` (`openrouter/free`, the `@fr` persona) are 0x/0x **and** skip the
+Models in `FREE_MODELS` (`openrouter/free`, which `TitleGen` runs on) are 0x/0x **and** skip the
 reservation entirely — free to run, so never metered or blocked.
+
+The multiplier and `CONTEXT_LIMITS` tables are keyed by **model id, not persona**, and deliberately
+still list models no configured persona uses — they're a reference for whatever a persona is pointed
+at next, not a description of what's wired up today.
 
 The `AiUsage` audit log keeps raw tokens + derived USD `cost`; the `AiRateLimitWindow.tokens` column
 stores **credits** (name kept, no rebuild).
@@ -52,8 +56,8 @@ and **every consumer of one turn must ask it the same question** — history tri
 text-only retry after a media failure included, or a fallback text turn silently bills at vision
 prices.
 
-Marv is the one dual-routed persona: `deepseek/deepseek-v4-flash-0731` for text,
-`openai/gpt-5.6-luna` for images. This is a capability split before it is a cost split — DeepSeek V4
+Marv is the only invokable persona at all, and the one dual-routed one:
+`deepseek/deepseek-v4-flash-0731` for text, `openai/gpt-5.6-luna` for images. This is a capability split before it is a cost split — DeepSeek V4
 Flash is **text-only** on OpenRouter, so without the vision route every attached image would be
 dropped. It does support `tools`, so club tools, web search and the media-generation tools all work
 on the text route.
