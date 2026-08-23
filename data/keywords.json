@@ -1,16 +1,8 @@
 [
   {
     "triggers": [
-      "@grok",
-      "@gork",
-      "jarvis",
-      "@gpt",
-      "@ds",
-      "@mi",
-      "@fr",
-      "@qw",
       "/\\b(asi)?marv\\b/g"
     ],
-    "script": "grok"
+    "script": "marv"
   }
 ]

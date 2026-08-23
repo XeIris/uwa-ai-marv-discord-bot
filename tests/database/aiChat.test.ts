@@ -64,9 +64,9 @@ describe('AiChatModel', () => {
     const first = await db.aiChat.getOrCreateSession(USER, 'Marv');
     const second = await db.aiChat.startNewSession(USER, 'Marv');
 
-    expect(second?.sessionId).not.toBe(first!.sessionId);
+    expect(second.sessionId).not.toBe(first!.sessionId);
     expect((await db.aiChat.getSessionById(first!.sessionId))?.active).toBe(0);
-    expect((await db.aiChat.getOrCreateSession(USER, 'Marv'))?.sessionId).toBe(second!.sessionId);
+    expect((await db.aiChat.getOrCreateSession(USER, 'Marv'))?.sessionId).toBe(second.sessionId);
   });
 });
 

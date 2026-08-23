@@ -37,7 +37,7 @@ class RamStats extends DevCommand {
 
       const embed = new Discord.EmbedBuilder()
         .setColor('#5865F2')
-        .setTitle(`RAM Stats — Silverwolf Process${stats.forceGc ? ' (after forced GC)' : ''}`)
+        .setTitle(`RAM Stats — Marv Process${stats.forceGc ? ' (after forced GC)' : ''}`)
         .setDescription(`\`\`\`\nRSS (total footprint)   : ${toMB(rss)} MB\n\`\`\``)
         .addFields(
           {

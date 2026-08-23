@@ -73,8 +73,10 @@ const openrouter = new OpenAI({
   // — don't let the SDK's own retry loop stack on top of that schedule.
   maxRetries: 0,
   defaultHeaders: {
-    'HTTP-Referer': 'https://bot.silverwolf.dev/',
-    'X-Title': 'Silverwolf',
+    // Identifies this app on OpenRouter (dashboard + public app rankings), so it
+    // has to be this bot rather than the upstream project it was forked from.
+    'HTTP-Referer': 'https://uwa-ai-club-site.vercel.app/',
+    'X-Title': 'UWA AI Marv',
   },
 });
 
@@ -88,7 +90,6 @@ export interface Persona {
   systemPromptFile?: string;
   triggers?: string[];
   responseModalities?: string[];
-  avatarURL?: string;
   webSearchEnabled?: boolean;
   /** OpenRouter provider-routing object (e.g. { only: ['xiaomi'], allow_fallbacks: false }). */
   providerRouting?: Record<string, any>;
@@ -99,7 +100,7 @@ export interface Persona {
   clubTools?: boolean;
   /**
    * Input modalities the model can read from Discord attachments (openrouter
-   * only). `true` means all of image/video/audio (omnimodal, e.g. MiMo);
+   * only). `true` means all of image/video/audio (an omnimodal model);
    * an explicit list narrows it — vision-only models take `["image"]`.
    * Omitted/false = no media input.
    *
@@ -357,15 +358,13 @@ async function hydratePersona(persona: Persona): Promise<Persona> {
 }
 
 /**
- * Does `content` invoke `trigger`? Sigil triggers (`@grok`) match as plain
- * substrings — the `@` is boundary enough. Bare-name triggers (`marv`,
- * `jarvis`) match on word boundaries only, so "marvel" doesn't hijack a message
- * aimed at another persona.
+ * Does `content` invoke `trigger`? Sigil triggers (`@name`) match as plain
+ * substrings — the `@` is boundary enough. Bare-name triggers (`marv`) match on
+ * word boundaries only, so "marvel" doesn't summon Marv.
  *
  * Apostrophes count as part of the word, both ASCII and typographic: `\b` treats
- * them as boundaries, so a plain word-boundary test fires on "jarvis's laptop",
- * which is talking *about* a persona rather than invoking it. Persona order then
- * decides the hijack — "@ds what is jarvis's origin" would answer as Jarvis.
+ * them as boundaries, so a plain word-boundary test fires on "marv's laptop",
+ * which is talking *about* the persona rather than invoking it.
  */
 function triggerMatches(contentLower: string, trigger: string): boolean {
   const t = String(trigger).toLowerCase();
@@ -412,8 +411,9 @@ async function getPersonaByName(name: string): Promise<Persona | undefined> {
 
 /**
  * Returns a short uppercase label identifying which AI a persona is invoked
- * by, derived from its primary trigger prefix (e.g. `@gpt` -> "GPT",
- * `@ds` -> "DS"). Falls back to the persona name when it has no triggers.
+ * by, derived from its primary trigger prefix (`marv` -> "MARV"). Falls back to
+ * the persona name when it has no triggers — which is also how sessions left
+ * behind by retired personas still label themselves in `/ai view`.
  */
 function getPersonaInvokeLabel(personaName: string): string {
   const personas: Persona[] = personasConfig.personas || [];
@@ -836,7 +836,7 @@ function getOpenRouterClient(): OpenAI {
 }
 
 /**
- * Discord bot history stores prompts like "User foo said: @grok hello".
+ * Discord bot history stores prompts like "User foo said: marv hello".
  * Strip that wrapper and persona triggers before titling.
  */
 function stripPersonaTriggers(text: string): string {

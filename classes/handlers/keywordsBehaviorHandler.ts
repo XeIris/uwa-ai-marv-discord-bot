@@ -1,6 +1,5 @@
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type Message,
-  type TextChannel,
+  EmbedBuilder, type Message,
 } from 'discord.js';
 import { log, logError } from '../../utils/log';
 import {
@@ -24,10 +23,14 @@ import {
   type MediaKind,
 } from '../../utils/aiMedia';
 
-const WEBHOOK_NAME = process.env.WEBHOOK_NAME || 'grok-webhook';
-
+/**
+ * Replies are sent as the bot itself. Marv *is* this bot, so there is no
+ * webhook impersonation any more: the answer arrives as a native Discord reply
+ * to the message that summoned him, which is also what threads the conversation
+ * and gives the jump-back link the old link buttons had to fake.
+ */
 const scriptHandlers = {
-  grok: async (message: Message): Promise<void> => {
+  marv: async (message: Message): Promise<void> => {
     const username = message.author?.username
       ? message.author.username.toLowerCase()
       : 'user';
@@ -95,8 +98,8 @@ const scriptHandlers = {
     let editOnlyPlaceholders: string[] = [];
     const mediaNotices: string[] = [];
     let mediaSlotHeld = false;
-    // Modalities this persona's model can read (e.g. MiMo: all three; Grok /
-    // GPT: images only). Anything outside this set is collected only if the
+    // Modalities this persona's model can read — Marv's vision route takes
+    // images only. Anything outside this set is collected only if the
     // generate_image edit path can still use it.
     const visionKinds = getPersonaMediaKinds(persona);
     const imageGenEnabled = hasMemory;
@@ -175,7 +178,9 @@ const scriptHandlers = {
     let prompt = '';
 
     if (contextMsg) {
-      const promptName = (contextMsg.author.username === displayName) ? 'You' : contextMsg.author.username;
+      // Replies are the bot's own messages now, so identity is the bot's user
+      // id rather than a webhook username match.
+      const promptName = (contextMsg.author.id === message.client.user?.id) ? 'You' : contextMsg.author.username;
       prompt = `${pdfPrefix}Previous message by ${promptName}: "${contextMsg.content}"
 
       ${metaPrefix}User ${username} said: ${query}${mediaSuffix}`;
@@ -184,8 +189,6 @@ const scriptHandlers = {
     }
 
     log(`Prompt: ${prompt}`);
-
-    const avatarURL = persona.avatarURL || message.client.user.displayAvatarURL();
 
     let aiSession = null;
     let history: any[] = [];
@@ -236,9 +239,6 @@ const scriptHandlers = {
     }
 
     try {
-      const webhooks = await (message.channel as TextChannel).fetchWebhooks();
-      let webhook = webhooks.find((wh: any) => wh.name === WEBHOOK_NAME && wh.token);
-
       // Dual routing: attachments the chat model must see force the persona's
       // vision model, everything else takes the cheap default. `withMedia` is
       // the whole input — the text-only retry below therefore also drops back to
@@ -253,7 +253,7 @@ const scriptHandlers = {
         history,
         webSearchEnabled: persona.webSearchEnabled,
         mediaParts: withMedia ? mediaParts : [],
-        // Image generation is Discord-only (delivery rides this webhook); the
+        // Image generation is Discord-only (delivery rides this reply); the
         // rate limit is keyed to the requesting Discord user. Attached images
         // ride along as edit sources for the generate_image tool. The
         // self-portrait reference rides the same clubTools gate as Marv's other
@@ -266,12 +266,12 @@ const scriptHandlers = {
             selfPortrait: persona.clubTools === true,
           }
           : undefined,
-        // Music generation rides the same webhook delivery; rate limit keyed
+        // Music generation rides the same reply delivery; rate limit keyed
         // to the requesting Discord user.
         musicGen: hasMemory
           ? { userId: message.author.id, db: (message.client as any).db }
           : undefined,
-        // Diagram rendering rides the same webhook delivery; rate limit keyed
+        // Diagram rendering rides the same reply delivery; rate limit keyed
         // to the requesting Discord user.
         diagramGen: hasMemory
           ? { userId: message.author.id, db: (message.client as any).db }
@@ -326,13 +326,6 @@ const scriptHandlers = {
       }
       const { text, images, toolCalls } = genResult;
 
-      if (!webhook) {
-        webhook = await (message.channel as TextChannel).createWebhook({
-          name: WEBHOOK_NAME,
-          avatar: avatarURL,
-        });
-      }
-
       // Prominent pre-reply notice when history was trimmed — so the user sees
       // it before the wall of AI text, not buried after.
       const trimWarning = contextWarnings.find((w) => w.wasTrimmed);
@@ -377,23 +370,14 @@ const scriptHandlers = {
       let currentChunk = remainingText.slice(0, MAX_LENGTH);
       remainingText = remainingText.slice(currentChunk.length).trimStart();
 
-      const componentsForFirstMessage: ActionRowBuilder<ButtonBuilder>[] = [];
-      const jumpLinkToOriginal = `https://discord.com/channels/${message.guildId}/${message.channelId}/${message.id}`;
-      const replyButton = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setLabel(`↩ Replying to: ${username}`)
-          .setStyle(ButtonStyle.Link)
-          .setURL(jumpLinkToOriginal),
-      );
-      componentsForFirstMessage.push(replyButton);
-
-      const sentInitial = await webhook.send({
+      // A native reply to the summoning message: Discord renders the jump-back
+      // link itself, so the old "↩ Replying to" link button is gone. The author
+      // is pinged (they asked), but `parse: []` still stops the model's own text
+      // from mentioning anyone.
+      const sentInitial = await message.reply({
         content: currentChunk || (filesToAttach.length > 0 ? '' : '(no content)'),
-        username: displayName,
-        avatarURL,
-        components: componentsForFirstMessage,
         files: filesToAttach,
-        allowedMentions: { parse: [] },
+        allowedMentions: { parse: [], repliedUser: true },
       });
       previousMsg = sentInitial;
       // Discord CDN URLs of attached generated images — saved to history so the
@@ -416,22 +400,12 @@ const scriptHandlers = {
 
         remainingText = remainingText.slice(currentChunk.length).trimStart();
 
-        const componentsForFollowUp: ActionRowBuilder<ButtonBuilder>[] = [];
-        const jumpLinkToPrevious = `https://discord.com/channels/${message.guildId}/${message.channelId}/${previousMsg.id}`;
-        const previousButton = new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder()
-            .setLabel('⬅ Previous')
-            .setStyle(ButtonStyle.Link)
-            .setURL(jumpLinkToPrevious),
-        );
-        componentsForFollowUp.push(previousButton);
-
-        const sent = await webhook.send({
+        // Each overflow chunk replies to the one before it, so a long answer
+        // chains in order and Discord supplies the "⬅ Previous" jump for free.
+        // No second ping: the user was already notified by the first chunk.
+        const sent = await previousMsg.reply({
           content: currentChunk,
-          username: displayName,
-          avatarURL,
-          components: componentsForFollowUp,
-          allowedMentions: { parse: [] },
+          allowedMentions: { parse: [], repliedUser: false },
         });
         previousMsg = sent;
       }
@@ -524,9 +498,11 @@ const scriptHandlers = {
         return;
       }
       logError('AI unified handler error', err);
-      await message.reply(
-        'Either, our code is fucked, their API is fucked, or you are just fucked. Please try again later.',
-      );
+      await message.reply({
+        content: 'Sorry — something went wrong while I was putting that reply together. '
+          + "It's usually a temporary hiccup on the AI provider's end. Please try again in a moment.",
+        allowedMentions: { repliedUser: false },
+      });
     }
   },
 };

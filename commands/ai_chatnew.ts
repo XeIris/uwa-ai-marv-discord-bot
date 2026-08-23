@@ -2,38 +2,24 @@ import { EmbedBuilder } from 'discord.js';
 import { Command } from './classes/Command';
 import { logError } from '../utils/log';
 
-const personasData = require('../data/aiPersonas.json');
-
-const NO_MEMORY_PERSONAS = ['Summarizer'];
-const personaChoices = (personasData.personas || [])
-  .filter((persona: any) => !NO_MEMORY_PERSONAS.includes(persona.name))
-  .slice(0, 25)
-  .map((persona: any) => ({
-    name: persona.name,
-    value: persona.name,
-  }));
+/**
+ * Marv is the only invokable persona, so this takes no arguments — a required
+ * option with exactly one choice is dead UI. Equivalent to sending `marv -n`.
+ */
+const PERSONA_NAME = 'Marv';
 
 class AiChatnew extends Command {
   constructor(client: any) {
-    super(client, 'chatnew', 'Start a new chat session for a specific AI', [
-      {
-        name: 'ai',
-        description: 'The AI persona to start a new chat with',
-        type: 3,
-        required: true,
-        choices: personaChoices,
-      },
-    ], {
+    super(client, 'chatnew', 'Start a new chat session with Marv', [], {
       isSubcommandOf: 'ai',
     });
   }
 
   async run(interaction: any): Promise<void> {
     const userId = interaction.user.id;
-    const personaName = interaction.options.getString('ai');
 
     try {
-      const session = await this.client.db.aiChat.startNewSession(userId, personaName);
+      const session = await this.client.db.aiChat.startNewSession(userId, PERSONA_NAME);
 
       await interaction.editReply({
         embeds: [
@@ -41,8 +27,8 @@ class AiChatnew extends Command {
             .setColor('#57F287')
             .setTitle('New Session Started')
             .setDescription(
-              `Started a new **${personaName}** chat session: **#${session.sessionId}**.\n`
-              + `Mentioning \`@${personaName.toLowerCase()}\` will now continue this new conversation.`,
+              `Started a new **${PERSONA_NAME}** chat session: **#${session.sessionId}**.\n`
+              + 'Saying `marv` will now continue this new conversation.',
             ),
         ],
       });

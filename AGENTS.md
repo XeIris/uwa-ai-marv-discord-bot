@@ -8,7 +8,7 @@ Not a GitHub fork and no shared commit history (squashed import), so upstream ch
 `git cherry-pick` from the `upstream` remote, never by merge. Upstream is **unlicensed** — don't
 copy its code into anything else without asking its authors first.
 
-**Last updated: 2026-08-21**
+**Last updated: 2026-08-23**
 
 > **Maintenance rule.** Edit agent docs only on *substantive architectural* change — new
 > architecture, new auth, new data flows/services, schema or security-model changes, or when
@@ -63,22 +63,27 @@ in the DB `GlobalConfig` table and override/augment env.
 
 ## What's here (and what was stripped)
 
-**AI features:** keyword-triggered AI chat (say `marv`/`@grok`/`@ds`/etc. → webhook replies via
+**AI features:** keyword-triggered AI chat (say `marv` → the bot replies as itself via
 `classes/handlers/keywordsBehaviorHandler.ts` → `utils/ai.ts`), per-user chat sessions
 (`/ai view|chatnew|chatswitch|chatdelete|retitle|forget`, `AiChatModel`), credit metering (`/ai usage`,
 `AiUsageModel`), AI chat summaries (`/summary count|time`), and the web-search / image-generation /
 music-generation (JAYDON) / diagram-rendering tools that ride along in chat. Personas live in
-`data/aiPersonas.json`.
+`data/aiPersonas.json` — **Marv is the only invokable one**; `Summarizer`, `Imgen` and `TitleGen`
+are triggerless config records for internal calls, not characters anyone can summon. The former
+third-party personas (Grok, GPT, Jarvis, MiMo, Qwen, Deepseek, FreeRouter) were removed as out of
+scope; don't resurrect them without saying so.
 
 **Club data (this fork's reason to exist):** `Marv` is the UWA AI Club mascot persona. It's the only
 persona with `clubTools: true`, which grants read-only tools backed by our own data: the committee
 roster (`/committee`), the events calendar (`/event`), the club constitution, four hand-maintained
 reference sheets (official links — also `/links`, UWA key dates, student perks, club FAQ), and UWA
 handbook unit lookup. Marv is **dual-routed** — image turns take a different model from text turns;
-the models and the routing rationale live in `.claude/rules/ai-limits.md`. Marv also answers to his bare name (`marv`, no `@`), matched on word
-boundaries so "marvel" doesn't summon him. Every user prompt is also tagged
-`[date]-[committee title]-[username]-` so any persona knows who it's talking to. See
-`.claude/rules/club-data.md`.
+the models and the routing rationale live in `.claude/rules/ai-limits.md`. He is summoned by his
+bare name (`marv`/`asimarv`, no sigil), matched on word boundaries so "marvel" doesn't summon him.
+Every user prompt is also tagged
+`[date]-[committee title]-[username]-` so he knows who he's talking to. **Marv answers as the bot
+user itself** — a native Discord reply to the summoning message, no webhook impersonation, because
+the bot *is* Marv. See `.claude/rules/club-data.md`.
 
 **Stripped:** `commands/askSilverwolfAI.ts`, the entire roleplay system (`utils/rp*`,
 `commands/ai_rp_*`, `classes/rpScheduler.ts`), the website (`site_src/`), games/economy,
@@ -118,7 +123,7 @@ per-guild `CommandConfig` blacklist.
 a global `banned` kill-switch. `DevCommand` enforces `isDev` before running.
 
 **Events** (wired in `classes/silverwolf.ts`): `messageCreate` → the single AI keyword trigger
-(`marv`/`@grok` etc. → `keywordsBehaviorHandler`); `interactionCreate` → command dispatch +
+(`marv`/`asimarv` → `keywordsBehaviorHandler`); `interactionCreate` → command dispatch +
 autocomplete; `guildMemberAdd` → the join welcome card (`welcomeHandler`, off unless the guild
 sets `welcome_channels`); message delete/edit tracked for history.
 

@@ -54,7 +54,7 @@ Resets: ${weeklyReset}
 
 **Status:** ${statusText}
         `)
-        .setFooter({ text: 'Note: AI roleplay cost is shared among active users in the chat.' })
+        .setFooter({ text: 'Credits measure AI token usage — longer conversations and heavier models cost more.' })
         .setTimestamp();
 
       await interaction.editReply({ embeds: [embed] });

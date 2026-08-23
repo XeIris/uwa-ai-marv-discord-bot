@@ -1,7 +1,7 @@
 # UWA AI Marv (Discord Bot)
 
 A fork of [Mewtwo2387/silverwolf](https://github.com/Mewtwo2387/silverwolf) stripped down to
-**AI features only**: mention-triggered AI chat (webhook replies), per-user chat sessions, credit
+**AI features only**: keyword-triggered AI chat, per-user chat sessions, credit
 metering, chat summaries, and web-search / image / music generation tools. No website, no
 games/economy, no roleplay system. Adds club-specific features for the UWA AI Club — the `Marv`
 mascot persona and the committee / events / constitution data it reads.
@@ -42,9 +42,9 @@ bun run dev    # watch mode
 bun run start  # production
 ```
 
-After first boot, register your server with `/server register`, then mention the bot
-(`@marv`, `@grok`, `@ds`, ...) in a channel to chat with an AI persona. Personas live in
-`data/aiPersonas.json`; use `-n` to start a fresh session.
+After first boot, register your server with `/server register`, then say `marv` in a channel to
+chat with him — he replies as the bot itself. Persona config lives in `data/aiPersonas.json`; use
+`-n` to start a fresh session.
 
 ## What's here
 
