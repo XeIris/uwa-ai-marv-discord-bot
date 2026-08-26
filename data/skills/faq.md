@@ -30,8 +30,7 @@ and on what terms. Guild rules constrain this, so committee should state the act
 
 ## What does membership cost?
 
-<!-- TODO: state the current Guild membership fee for this club, and whether there is a
-free/discounted tier. Do not guess a dollar figure. -->
+AU$5 per year.
 
 ## Which channel should I post in?
 
