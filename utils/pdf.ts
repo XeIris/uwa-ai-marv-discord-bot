@@ -2,6 +2,14 @@ import type { Message, Attachment } from 'discord.js';
 import { fileURLToPath } from 'url';
 import { logError } from './log';
 
+/**
+ * Opening marker of an extracted-PDF block. utils/pdf.worker.ts writes it (it is
+ * a standalone subprocess entrypoint and deliberately imports no local modules,
+ * so it spells the marker out); utils/ai.ts matches on it to decide whether the
+ * system prompt needs the untrusted-document warning. Keep the two in step.
+ */
+export const PDF_ATTACHMENT_MARKER = '<<PDF_ATTACHMENT';
+
 const SUBPROCESS_TIMEOUT_MS = 60_000;
 const WORKER_PATH = fileURLToPath(new URL('./pdf.worker.ts', import.meta.url));
 
@@ -22,6 +30,11 @@ type WorkerResponse = WorkerSuccess | WorkerFailure;
 function isPdfAttachment(att: Attachment): boolean {
   if (att.contentType === 'application/pdf') return true;
   return typeof att.name === 'string' && att.name.toLowerCase().endsWith('.pdf');
+}
+
+/** True when the message carries at least one PDF attachment. */
+export function messageHasPdf(message: Message): boolean {
+  return message.attachments.some(isPdfAttachment);
 }
 
 /**

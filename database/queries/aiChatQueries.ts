@@ -58,6 +58,12 @@ const aiChatQueries = {
     )
   `,
   GET_HISTORY: 'SELECT * FROM AiChatHistory WHERE session_id = ? ORDER BY id DESC LIMIT ?',
+  // Newest `user` row in a session — the start of the last turn (see undoLastTurn).
+  GET_LAST_USER_TURN: "SELECT id, message FROM AiChatHistory WHERE session_id = ? AND role = 'user' ORDER BY id DESC LIMIT 1",
+  // Everything from that row onward: the user message, the assistant reply, and
+  // any `tool` audit rows recorded between them. Rows are only ever appended, so
+  // "id >= the last user row" is exactly the trailing turn.
+  DELETE_HISTORY_FROM: 'DELETE FROM AiChatHistory WHERE session_id = ? AND id >= ?',
   DELETE_HISTORY_BY_SESSION: 'DELETE FROM AiChatHistory WHERE session_id = ?',
   DELETE_SESSION: 'DELETE FROM AiChatSession WHERE session_id = ?',
 };

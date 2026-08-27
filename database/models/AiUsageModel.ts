@@ -1,7 +1,9 @@
 import type Database from '../Database';
 import aiUsageQueries from '../queries/aiUsageQueries';
 import { DAILY_LIMIT, WEEKLY_LIMIT } from '../../utils/ai';
-import { creditsForTokens, usdCostForTokens } from '../../utils/aiPricing';
+import {
+  creditsForImages, creditsForTokens, usdCostForImages, usdCostForTokens,
+} from '../../utils/aiPricing';
 
 type WindowType = 'daily' | 'weekly';
 
@@ -43,8 +45,30 @@ class AiUsageModel {
   ): Promise<void> {
     const credits = Math.round(creditsForTokens(model, promptTokens, completionTokens));
     const usdCost = usdCostForTokens(model, promptTokens, completionTokens);
+    await this.record(userId, model, promptTokens, completionTokens, credits, usdCost);
+  }
 
-    // Log the call (audit) and fold its credits into both fixed windows atomically.
+  /**
+   * Records `images` generated images against the same daily/weekly windows as
+   * chat. Image models are billed per image, not per token, so the audit row
+   * logs zero tokens and the true list cost — AiUsage.cost stays a real-money
+   * ledger — while the windows carry the IMAGE_CREDIT_MULTIPLIER surcharge.
+   */
+  async addImageUsage(userId: string, model: string, images = 1): Promise<void> {
+    const credits = Math.round(creditsForImages(model, images));
+    const usdCost = usdCostForImages(model, images);
+    await this.record(userId, model, 0, 0, credits, usdCost);
+  }
+
+  /** Logs the call (audit) and folds its credits into both fixed windows atomically. */
+  private async record(
+    userId: string,
+    model: string,
+    promptTokens: number,
+    completionTokens: number,
+    credits: number,
+    usdCost: number,
+  ): Promise<void> {
     await this.db.executeTransaction((rawDb) => {
       const logResult = rawDb.query(aiUsageQueries.ADD_USAGE)
         .run(userId, model, promptTokens, completionTokens, usdCost);

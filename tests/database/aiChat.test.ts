@@ -70,6 +70,102 @@ describe('AiChatModel', () => {
   });
 });
 
+describe('AiChatModel.undoLastTurn', () => {
+  let db: Database;
+
+  beforeAll(async () => {
+    db = new Database(`./tests/temp/testAiUndo-${Date.now()}.db`);
+    await db.ready;
+  });
+
+  afterAll(() => { db.db.close(); });
+
+  beforeEach(async () => {
+    await db.executeQuery('DELETE FROM AiChatHistory');
+    await db.executeQuery('DELETE FROM AiChatSession');
+  });
+
+  const messages = async (sessionId: number) => (await db.aiChat.getHistory(sessionId))
+    .map((r) => [r.role, r.message]);
+
+  test('refuses when the user has no session with that persona', async () => {
+    expect(await db.aiChat.undoLastTurn(USER, 'Marv')).toEqual({ ok: false, reason: 'no_session' });
+  });
+
+  test('refuses on an empty session', async () => {
+    await db.aiChat.getOrCreateSession(USER, 'Marv');
+    expect(await db.aiChat.undoLastTurn(USER, 'Marv')).toEqual({ ok: false, reason: 'empty' });
+  });
+
+  test('drops the last user message and its reply, keeping earlier turns', async () => {
+    const session = await db.aiChat.getOrCreateSession(USER, 'Marv');
+    const id = session!.sessionId;
+    await db.aiChat.addHistory(id, 'user', 'first question');
+    await db.aiChat.addHistory(id, 'assistant', 'first answer');
+    await db.aiChat.addHistory(id, 'user', 'second question');
+    await db.aiChat.addHistory(id, 'assistant', 'second answer');
+
+    const undo = await db.aiChat.undoLastTurn(USER, 'Marv');
+    expect(undo.ok).toBe(true);
+    expect(undo.userMessage).toBe('second question');
+    expect(await messages(id)).toEqual([['user', 'first question'], ['assistant', 'first answer']]);
+  });
+
+  test('drops the tool audit rows recorded inside the turn too', async () => {
+    const session = await db.aiChat.getOrCreateSession(USER, 'Marv');
+    const id = session!.sessionId;
+    await db.aiChat.addHistory(id, 'user', 'draw me a cat');
+    await db.aiChat.addHistory(id, 'tool', 'generate_image(...)');
+    await db.aiChat.addHistory(id, 'assistant', 'here you go');
+
+    expect((await db.aiChat.undoLastTurn(USER, 'Marv')).ok).toBe(true);
+    expect(await messages(id)).toEqual([]);
+  });
+
+  test('a turn with no reply yet is still dropped', async () => {
+    const session = await db.aiChat.getOrCreateSession(USER, 'Marv');
+    const id = session!.sessionId;
+    await db.aiChat.addHistory(id, 'user', 'orphaned question');
+
+    expect((await db.aiChat.undoLastTurn(USER, 'Marv')).ok).toBe(true);
+    expect(await messages(id)).toEqual([]);
+  });
+
+  test('repeated calls walk back one turn at a time', async () => {
+    const session = await db.aiChat.getOrCreateSession(USER, 'Marv');
+    const id = session!.sessionId;
+    await db.aiChat.addHistory(id, 'user', 'q1');
+    await db.aiChat.addHistory(id, 'assistant', 'a1');
+    await db.aiChat.addHistory(id, 'user', 'q2');
+    await db.aiChat.addHistory(id, 'assistant', 'a2');
+
+    expect((await db.aiChat.undoLastTurn(USER, 'Marv')).userMessage).toBe('q2');
+    expect((await db.aiChat.undoLastTurn(USER, 'Marv')).userMessage).toBe('q1');
+    expect(await db.aiChat.undoLastTurn(USER, 'Marv')).toEqual({ ok: false, reason: 'empty' });
+  });
+
+  test('refuses on a session paused by the content-safety screen', async () => {
+    const session = await db.aiChat.getOrCreateSession(USER, 'Marv');
+    const id = session!.sessionId;
+    await db.aiChat.addHistory(id, 'user', 'something');
+    await db.aiChat.flagSessionModeration(id, 'test');
+
+    expect(await db.aiChat.undoLastTurn(USER, 'Marv')).toEqual({ ok: false, reason: 'paused' });
+    // The history is left alone — -f is not a way out of a pause.
+    expect(await messages(id)).toEqual([['user', 'something']]);
+  });
+
+  test('only touches the caller\'s own session', async () => {
+    const mine = await db.aiChat.getOrCreateSession(USER, 'Marv');
+    const theirs = await db.aiChat.getOrCreateSession('200000000000000001', 'Marv');
+    await db.aiChat.addHistory(mine!.sessionId, 'user', 'mine');
+    await db.aiChat.addHistory(theirs!.sessionId, 'user', 'theirs');
+
+    expect((await db.aiChat.undoLastTurn(USER, 'Marv')).ok).toBe(true);
+    expect(await messages(theirs!.sessionId)).toEqual([['user', 'theirs']]);
+  });
+});
+
 describe('schema integrity', () => {
   let db: Database;
 

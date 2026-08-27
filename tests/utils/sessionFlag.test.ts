@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { parseNewSessionFlag } from '../../utils/sessionFlag';
+import { parseNewSessionFlag, parseForgetFlag, parseSessionFlags } from '../../utils/sessionFlag';
 
 describe('parseNewSessionFlag', () => {
   test('detects the flag and strips it from the text', () => {
@@ -49,5 +49,55 @@ describe('parseNewSessionFlag', () => {
   test('handles empty and non-string input', () => {
     expect(parseNewSessionFlag('')).toEqual({ requested: false, text: '' });
     expect(parseNewSessionFlag(undefined as any)).toEqual({ requested: false, text: '' });
+  });
+});
+
+describe('parseForgetFlag', () => {
+  test('detects the flag and strips it from the text', () => {
+    expect(parseForgetFlag('@marv -f')).toEqual({ requested: true, text: '@marv' });
+  });
+
+  test('is case-insensitive', () => {
+    expect(parseForgetFlag('marv -F').requested).toBe(true);
+  });
+
+  test('leaves an ordinary message untouched', () => {
+    const plain = 'marv what does the -flag do?';
+    expect(parseForgetFlag(plain)).toEqual({ requested: false, text: plain });
+  });
+
+  test.each([
+    ['marv what does -fo mean?', 'longer flag'],
+    ['marv explain foo-f please', 'suffix of a word'],
+    ['marv run with --f', 'double dash'],
+    ['marv-f hi', 'glued to the trigger'],
+  ])('does not fire on %p (%s)', (input) => {
+    expect(parseForgetFlag(input)).toEqual({ requested: false, text: input });
+  });
+
+  test('handles empty and non-string input', () => {
+    expect(parseForgetFlag('')).toEqual({ requested: false, text: '' });
+    expect(parseForgetFlag(undefined as any)).toEqual({ requested: false, text: '' });
+  });
+});
+
+describe('parseSessionFlags', () => {
+  test('reads each flag on its own', () => {
+    expect(parseSessionFlags('marv -n')).toEqual({ newSession: true, forgetLast: false, text: 'marv' });
+    expect(parseSessionFlags('marv -f')).toEqual({ newSession: false, forgetLast: true, text: 'marv' });
+  });
+
+  test('strips both when both are present, in either order', () => {
+    expect(parseSessionFlags('marv -n -f')).toEqual({ newSession: true, forgetLast: true, text: 'marv' });
+    expect(parseSessionFlags('marv -f -n')).toEqual({ newSession: true, forgetLast: true, text: 'marv' });
+  });
+
+  test('an ordinary message carries neither flag and is unchanged', () => {
+    const plain = 'marv when is the next social?';
+    expect(parseSessionFlags(plain)).toEqual({ newSession: false, forgetLast: false, text: plain });
+  });
+
+  test('preserves newlines', () => {
+    expect(parseSessionFlags('marv -f line one\nline two').text).toBe('marv line one\nline two');
   });
 });

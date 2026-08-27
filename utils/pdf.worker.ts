@@ -111,6 +111,8 @@ async function extractOne(att: AttachmentInfo): Promise<{ block?: string; notice
     .replace(/"/g, '\\"')
     // eslint-disable-next-line no-control-regex
     .replace(/[\x00-\x1F\x7F]/g, ' ');
+  // Marker duplicated as PDF_ATTACHMENT_MARKER in utils/pdf.ts — this file is a
+  // standalone subprocess entrypoint and imports no local modules.
   return { block: `<<PDF_ATTACHMENT name="${safeName}">>\n${body}\n<</PDF_ATTACHMENT>>` };
 }
 
