@@ -44,6 +44,25 @@ const SELF_PORTRAIT_PATH = `${import.meta.dir}/../data/marv-pfp.png`;
 const SELF_PORTRAIT_MIME = 'image/png';
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
+/**
+ * MIME type sniffed from the leading bytes, for `/images` responses that omit
+ * `media_type` (the field is documented as present "whenever the format is
+ * identifiable", so it can be absent). Deliberately NOT a default of image/png:
+ * mislabelling webp bytes as PNG would hand aiModeration and Discord a file
+ * whose extension lies about its contents. Covers exactly the types
+ * aiModeration's GENERATED_IMAGE_MIMES accepts; anything else stays unknown and
+ * is rejected by the caller.
+ */
+function sniffImageMime(buf: Buffer): string {
+  if (buf.length >= 8 && buf.subarray(0, 8).equals(PNG_SIGNATURE)) return 'image/png';
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf.length >= 12 && buf.subarray(0, 4).toString('latin1') === 'RIFF'
+    && buf.subarray(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  if (buf.length >= 6 && buf.subarray(0, 6).toString('latin1').startsWith('GIF8')) return 'image/gif';
+  if (buf.length >= 2 && buf[0] === 0x42 && buf[1] === 0x4d) return 'image/bmp';
+  return '';
+}
+
 const IMAGE_GEN_TIMEOUT_MS = 60_000;
 const MAX_PROMPT_CHARS = 2_000;
 // Discord upload cap on non-boosted servers.
@@ -324,8 +343,15 @@ export async function runImageGeneration(opts: {
         );
         const first = res?.data?.[0];
         base64 = typeof first?.b64_json === 'string' ? first.b64_json : '';
-        // The endpoint honours output_format; we take whatever it chose (webp today).
+        // We take whatever format the endpoint chose (webp for muse today).
+        // `media_type` is only documented as present when the format is
+        // identifiable, so fall back to sniffing the bytes rather than throwing
+        // away an image we successfully generated and paid for.
         mime = typeof first?.media_type === 'string' ? first.media_type : '';
+        if (!mime && base64) {
+          mime = sniffImageMime(Buffer.from(base64, 'base64'));
+          if (mime) log(`[imagegen] ${model} omitted media_type; sniffed ${mime} from the bytes`);
+        }
       } else {
         // Hybrid chat model: the source images ride as multimodal content parts.
         const userContent = sourceParts.length > 0

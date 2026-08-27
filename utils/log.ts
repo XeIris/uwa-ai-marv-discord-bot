@@ -41,6 +41,39 @@ function handleUncaughtException(error: Error): void {
   logError('----- UNCAUGHT EXCEPTION: -----', error);
 }
 
+/** Credential shapes worth scrubbing before a rejection reason hits disk. */
+const SECRET_PATTERNS: RegExp[] = [
+  // Authorization headers, and the API key shapes this bot actually holds
+  // (OpenRouter `sk-or-...`, OpenAI-style `sk-...`, Discord bot tokens).
+  /\b(bearer\s+)[\w.\-~+/]+=*/gi,
+  /\bsk-[A-Za-z0-9_-]{16,}/g,
+  /\b[A-Za-z0-9_-]{24,28}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}\b/g,
+];
+
+/** Anything longer than this is a payload, not a diagnostic. */
+const MAX_REJECTION_CHARS = 4000;
+
+/**
+ * Rejection reasons are arbitrary values from anywhere in the process, and this
+ * handler writes them to disk. A rejected provider call can carry an
+ * Authorization header or a multi-MB base64 image in its message, so scrub the
+ * credential shapes and cap the length before persisting. Best-effort: this
+ * reduces the blast radius of an unlucky reason, it is not a guarantee, so the
+ * rule against deliberately logging secrets still stands.
+ */
+function sanitizeRejectionReason(reason: unknown): string {
+  const raw = reason instanceof Error
+    ? (reason.stack || `${reason.name}: ${reason.message}`)
+    : String(reason);
+  const scrubbed = SECRET_PATTERNS.reduce(
+    (acc, pattern) => acc.replace(pattern, (m, prefix = '') => `${prefix}[redacted]`),
+    raw,
+  );
+  return scrubbed.length > MAX_REJECTION_CHARS
+    ? `${scrubbed.slice(0, MAX_REJECTION_CHARS)}… [truncated, ${scrubbed.length} chars total]`
+    : scrubbed;
+}
+
 /**
  * Bun 1.4 makes an unawaited rejected promise fatal by default: with no
  * listener the process exits 1. Plenty of this bot's work is deliberately not
@@ -54,7 +87,7 @@ function handleUncaughtException(error: Error): void {
  * catching failures where they happen and giving them a name in the log.
  */
 function handleUnhandledRejection(reason: unknown): void {
-  logError('----- UNHANDLED REJECTION: -----', reason);
+  logError('----- UNHANDLED REJECTION: -----', sanitizeRejectionReason(reason));
 }
 
 process.on('uncaughtException', handleUncaughtException);
@@ -63,6 +96,7 @@ log('Catching uncaught exceptions and unhandled rejections...');
 
 export {
   log,
+  sanitizeRejectionReason,
   logError,
   logWarning,
   logErrorFilePath,

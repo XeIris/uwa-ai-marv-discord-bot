@@ -305,3 +305,75 @@ describe('credit metering', () => {
     expect(usage.charged).toEqual([]);
   });
 });
+
+describe('media_type fallback', () => {
+  const sniffCase = async (bytes: Buffer) => {
+    const db = fakeDb();
+    const client: any = {
+      // b64_json present, media_type absent — documented as only included when
+      // the format is identifiable.
+      post: async () => ({ data: [{ b64_json: bytes.toString('base64') }] }),
+    };
+    return runImageGeneration({
+      ctx: { userId: 'u1', db },
+      openrouter: client,
+      model: 'meta/muse-image',
+      args: { prompt: 'a cat' },
+    });
+  };
+
+  test('sniffs a PNG when media_type is omitted', async () => {
+    const png = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.alloc(16),
+    ]);
+    const result = await sniffCase(png);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.attachment.name.endsWith('.png')).toBe(true);
+  });
+
+  test('sniffs a webp when media_type is omitted', async () => {
+    const webp = Buffer.concat([
+      Buffer.from('RIFF', 'latin1'),
+      Buffer.alloc(4),
+      Buffer.from('WEBP', 'latin1'),
+      Buffer.alloc(16),
+    ]);
+    const result = await sniffCase(webp);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.attachment.name.endsWith('.webp')).toBe(true);
+  });
+
+  test('sniffs a JPEG when media_type is omitted', async () => {
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(16)]);
+    const result = await sniffCase(jpeg);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.attachment.name.endsWith('.jpg')).toBe(true);
+  });
+
+  test('unrecognisable bytes are rejected rather than guessed at', async () => {
+    // Never defaults to image/png: a wrong extension would lie to aiModeration
+    // and to Discord about what the file actually is.
+    const result = await sniffCase(Buffer.from('not an image at all', 'latin1'));
+    expect(result.ok).toBe(false);
+  });
+
+  test('an explicit media_type still wins over sniffing', async () => {
+    const db = fakeDb();
+    const png = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.alloc(16),
+    ]);
+    const client: any = {
+      post: async () => ({ data: [{ b64_json: png.toString('base64'), media_type: 'image/webp' }] }),
+    };
+    const result = await runImageGeneration({
+      ctx: { userId: 'u1', db },
+      openrouter: client,
+      model: 'meta/muse-image',
+      args: { prompt: 'a cat' },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.attachment.name.endsWith('.webp')).toBe(true);
+  });
+});

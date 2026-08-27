@@ -50,7 +50,7 @@ Enforcement is `db.aiUsage.tryReserve(userId, estCredits)` → `release()` in `f
 in-memory in-flight reservation held for the whole generation so concurrent spam can't all pass the
 check before usage lands. **No dev bypass — everyone is metered.**
 
-### Generated images
+## Generated images
 
 Image models are billed **per image**, not per token, so they can't ride the multipliers.
 `MODEL_USD_PER_IMAGE` holds the list price and `creditsForImages()` converts it at the same
@@ -146,9 +146,15 @@ safety control — an unreadable exceptions table means "no known exceptions", a
 web search and image generation mid-conversation on a transient DB error is the worse failure.
 
 The switches only ever **subtract**: a persona without `webSearchEnabled` still gets no web search,
-and a memoryless persona still gets nothing. Wired into `keywordsBehaviorHandler` (the only
-tool-bearing surface); `/summary` uses no tools. With `pdf` off, an attached PDF gets a notice
-saying how to turn it back on rather than being silently dropped.
+and the media tools stay gated on session memory on top of the switch. Preferences are resolved for
+**every** persona, memoryless ones included — `pdf` and `websearch` need no session memory, so a
+user who turned them off must be honoured regardless of which persona answers. Wired into
+`keywordsBehaviorHandler` (the only tool-bearing surface); `/summary` uses no tools. With `pdf` off,
+an attached PDF gets a notice saying how to turn it back on rather than being silently dropped.
+
+The effective web-search answer is computed **once per turn** and passed to both `generateContent`
+and `trimHistoryToFit`. Trimming reserves extra context for the search tool schemas, so a
+disagreement costs the user history to a budget the request never spends.
 
 ## System prompt
 

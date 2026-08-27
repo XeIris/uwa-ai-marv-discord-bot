@@ -18,7 +18,6 @@ import { CLUB_TOOL_NAMES, perthDateString } from '../../utils/clubInfo';
 import { parseSessionFlags } from '../../utils/sessionFlag';
 import { trimHistoryToFit } from '../../utils/tokenizer';
 import { extractPdfsFromMessage, messageHasPdf } from '../../utils/pdf';
-import { defaultAiTools } from '../../utils/aiTools';
 import {
   collectMediaFromMessage, hasQualifyingMedia, tryAcquireMediaSlot, releaseMediaSlot,
   type MediaKind,
@@ -182,9 +181,16 @@ const scriptHandlers = {
       // Per-user tool switches (utils/aiTools.ts). Everything is on by default;
       // these only ever SUBTRACT, so a persona that was never granted web search
       // still gets none, and the club tools aren't switchable at all.
-      const enabledTools = hasMemory
-        ? await (message.client as any).db.aiTools.resolve(message.author.id)
-        : defaultAiTools();
+      // Resolved for every persona, not just memoryful ones: `pdf` and
+      // `websearch` don't need session memory, so a user who turned them off
+      // must be honoured even on a persona that stores nothing.
+      const enabledTools = await (message.client as any).db.aiTools
+        .resolve(message.author.id);
+      // One effective web-search answer for the whole turn. History trimming
+      // reserves extra room for the search tool schemas, so it has to agree with
+      // what generateContent actually sends — otherwise a user who turned web
+      // search off loses history to a budget this request never uses.
+      const webSearchEnabled = Boolean(persona.webSearchEnabled) && enabledTools.websearch;
 
       // PDF reading off: don't spawn the extractor at all, but say so rather
       // than silently ignoring an attachment the member clearly meant to send.
@@ -356,7 +362,7 @@ const scriptHandlers = {
             persona.systemPrompt ?? '',
             filteredHistory,
             prompt,
-            persona.webSearchEnabled,
+            webSearchEnabled,
           );
           history = trimmedHistory;
           contextWarnings = warnings;
@@ -450,7 +456,7 @@ const scriptHandlers = {
           systemPrompt: persona.systemPrompt ?? '',
           prompt,
           history,
-          webSearchEnabled: persona.webSearchEnabled && enabledTools.websearch,
+          webSearchEnabled,
           mediaParts: withMedia ? mediaParts : [],
           // Image generation is Discord-only (delivery rides this reply); the
           // rate limit is keyed to the requesting Discord user. Attached images
@@ -504,7 +510,7 @@ const scriptHandlers = {
                 persona.systemPrompt ?? '',
                 filteredHistory,
                 prompt,
-                persona.webSearchEnabled,
+                webSearchEnabled,
               );
               history = retryTrim.trimmedHistory;
               contextWarnings = retryTrim.warnings;
