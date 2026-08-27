@@ -10,6 +10,7 @@
       "model": "deepseek/deepseek-v4-flash-0731",
       "providerRouting": {
         "sort": "price",
+        "preferred_min_throughput": 60,
         "allow_fallbacks": true,
         "require_parameters": true,
         "data_collection": "deny"

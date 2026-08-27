@@ -130,10 +130,10 @@ a 15s timeout, and `Response Safety` turns on the assistant's text, not on a pic
 pass already ruled on. If the model rejects the images (400/413/415/422 or an image/vision error)
 the screen retries once text-only before failing open.
 
-### Generated images
+### Generated images and diagrams
 
-The output pass screens the *prompts* the model passed to `generate_image`/`generate_music` as part
-of the reply text. That is not the same as screening the picture, so `moderateGeneratedImages`
+The output pass screens the *prompts* the model passed to
+`generate_image`/`generate_music`/`render_diagram` as part of the reply text. That is not the same as screening the picture, so `moderateGeneratedImages`
 screens the returned bytes too, after the text pass and only on turns that actually generated an
 image (≤ `IMAGE_GEN_DAILY_LIMIT` per user per day). `generatedImagePart` derives the MIME from the
 filename `runImageGeneration` built out of the provider's own data URL, and returns null for anything
@@ -142,6 +142,21 @@ that isn't an image — `generate_music`'s WAV rides the same attachment list.
 The bytes go in as the **user** turn (the only position the classifier accepts images in), so the
 reply says `User Safety`, and `moderateGeneratedImages` re-attributes it to `flaggedSide:
 'response'` — it is our output whatever the label says. **Don't "fix" that to `'user'`.**
+
+A rendered diagram is a PNG on that same attachment list, so it is screened as a generated image —
+which means the caption handed to `moderateGeneratedImages` **must** cover `render_diagram` too. It
+did not until 2026-08-27: a diagram-only turn was judged against an empty caption, and a turn that
+made both an image and a diagram judged the diagram under the *image's* prompt. A wrong caption is
+worse than no caption here, because the cost of a false positive is a permanently paused session.
+
+The words *inside* a diagram are a separate problem: the model chooses every label, and the reply
+text does not contain them, so `Response Safety` over the reply alone never sees them. `generateContent`
+therefore returns `screeningText` — `extractDiagramText` (`utils/diagramGen.ts`) run over the
+untruncated markup — which the handler folds into the output text screen. It is captured inside the
+tool loop because `redactToolCallArgs` cuts the recorded `source` to 500 chars for the audit row;
+screening `toolCalls[].args.source` would screen a truncated prefix, the exact failure `chunkText`
+exists to avoid. The extract is capped at 4000 chars so it cannot turn one screening call into
+three on the critical path.
 
 ### Known limits
 

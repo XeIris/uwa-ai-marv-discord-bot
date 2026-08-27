@@ -7,6 +7,7 @@ import {
   checkDimensions,
   clampDimension,
   sanitizeTitle,
+  extractDiagramText,
   MAX_WIDTH,
   MIN_WIDTH,
   MAX_HEIGHT,
@@ -230,5 +231,36 @@ describe('sanitizeTitle', () => {
     expect(sanitizeTitle('')).toBe('diagram');
     expect(sanitizeTitle(undefined)).toBe('diagram');
     expect(sanitizeTitle('%^&*')).toBe('diagram');
+  });
+});
+
+describe('extractDiagramText', () => {
+  test('pulls the labels out of html markup', () => {
+    const out = extractDiagramText('<div class="box" style="fill:#fff"><span>Login</span><span>Database</span></div>');
+    expect(out).toBe('Login Database');
+  });
+
+  test('drops css bodies rather than reading them as prose', () => {
+    const out = extractDiagramText('<style>.a { fill: red; content: "xyz"; }</style><p>Real label</p>');
+    expect(out).toBe('Real label');
+  });
+
+  test('reads svg text nodes and decodes entities', () => {
+    const out = extractDiagramText('<svg><text x="10" y="20">A &amp; B</text><text>C &lt; D</text></svg>');
+    expect(out).toBe('A & B C < D');
+  });
+
+  test('keeps attribute values out — they are geometry, not prose', () => {
+    expect(extractDiagramText('<rect x="10" y="20" width="30" fill="#1e1f22" />')).toBe('');
+  });
+
+  test('caps the output so one screening call cannot become several', () => {
+    const long = `<p>${'word '.repeat(5000)}</p>`;
+    expect(extractDiagramText(long, 4000).length).toBe(4000);
+  });
+
+  test('tolerates empty and nullish source', () => {
+    expect(extractDiagramText('')).toBe('');
+    expect(extractDiagramText(undefined as any)).toBe('');
   });
 });

@@ -82,6 +82,27 @@ const AUDIO_TYPES: Record<string, string> = {
   'audio/x-m4a': 'm4a',
 };
 
+/**
+ * Rewrites the attachment placeholders in a stored history turn so they read as
+ * past, unviewable references.
+ *
+ * Media is sent as base64 for exactly one generation and never persisted — only
+ * the `[attached image: cat.png]` text enters history. On a later turn the model
+ * therefore sees a line identical in shape to a live attachment, with no bytes
+ * behind it, and either hallucinates the contents or insists it can see it.
+ *
+ * Applied at replay time rather than at write time so turns already in the DB
+ * are covered too. Anchored on a closing bracket at end-of-line, which is how
+ * the live suffix is written; anything already carrying a trailing annotation
+ * (an edit-only placeholder, or an `unreadableNote`) is left alone.
+ */
+export function markStaleMediaPlaceholders(text: string): string {
+  return (text ?? '').replace(
+    /^\[attached (image|video|audio): (.+)\]$/gim,
+    '[attached $1: $2] (from an earlier message — NOT VIEWABLE now. You saw it at the time but cannot see it any more; ask the user to re-send it rather than guessing.)',
+  );
+}
+
 export type MediaKind = 'image' | 'video' | 'audio';
 
 /** Every modality this module can turn into an OpenRouter content part. */
@@ -101,8 +122,30 @@ export interface MediaCollectionResult {
   fromReply: boolean[];
   /** Text placeholders for the stored prompt, e.g. "[attached image: cat.png]". */
   placeholders: string[];
+  /**
+   * Placeholders for attachments that were present but never made it into
+   * `parts` — too big, over budget, or a failed download. These go into the
+   * prompt alongside `placeholders` so the model knows something was attached
+   * and that it cannot see it. Without them the model is told nothing at all
+   * and confidently answers as though the message had no attachment, directly
+   * contradicting the warning the user was just shown.
+   */
+  unreadable: string[];
   /** User-facing notes about skipped/failed attachments. */
   notices: string[];
+}
+
+/**
+ * Annotation appended to a placeholder for an attachment the model cannot see.
+ * It sits **outside** the brackets so `markStaleMediaPlaceholders` (which
+ * anchors on a closing bracket at end-of-line) never re-annotates it.
+ *
+ * Worded as an instruction because Marv's system prompt tells him he can always
+ * see attachments and must never claim otherwise — a bare "(failed)" loses to
+ * that instruction and he apologises for an image he insists he can see.
+ */
+function unreadableNote(reason: string): string {
+  return ` (NOT VIEWABLE — ${reason}. You cannot see this one. Say so plainly if the user asks about it; do not guess at its contents.)`;
 }
 
 /** Human-readable formats per modality, for the "not supported" notice. */
@@ -113,7 +156,7 @@ const KIND_DESCRIPTIONS: Record<MediaKind, string> = {
 };
 
 /** "a", "a and b", "a, b and c" — keeps the notice readable at any length. */
-function joinWithAnd(items: string[]): string {
+export function joinWithAnd(items: string[]): string {
   if (items.length <= 1) return items[0] ?? '';
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }
@@ -187,6 +230,7 @@ export async function collectMediaFromMessage(
   const kinds: MediaKind[] = [];
   const fromReplyFlags: boolean[] = [];
   const placeholders: string[] = [];
+  const unreadable: string[] = [];
   const notices: string[] = [];
 
   const counts: Record<MediaKind, number> = { image: 0, video: 0, audio: 0 };
@@ -220,7 +264,7 @@ export async function collectMediaFromMessage(
 
   if (candidates.length === 0 && skippedUnsupported === 0) {
     return {
-      parts, kinds, fromReply: fromReplyFlags, placeholders, notices,
+      parts, kinds, fromReply: fromReplyFlags, placeholders, unreadable, notices,
     };
   }
 
@@ -234,22 +278,29 @@ export async function collectMediaFromMessage(
     const cap = byteCaps[kind];
     if (att.size > cap) {
       notices.push(`⚠ Skipped **${att.name}** — ${kind}s are capped at ${fmtMB(cap)} (yours is ${fmtMB(att.size)}).`);
+      unreadable.push(`[attached ${kind}: ${att.name || 'file'}]${unreadableNote(`too large, over the ${fmtMB(cap)} limit`)}`);
       continue;
     }
     if (totalBytes + att.size > TOTAL_MEDIA_BYTES) {
       notices.push(`⚠ Skipped **${att.name}** — total media budget of ${fmtMB(TOTAL_MEDIA_BYTES)} per request reached.`);
+      unreadable.push(`[attached ${kind}: ${att.name || 'file'}]${unreadableNote('skipped, the request\'s total attachment budget was already full')}`);
       continue;
     }
 
     const buf = await downloadAttachment(att, cap);
     if (!buf) {
       notices.push(`⚠ Couldn't download **${att.name}** — continuing without it.`);
+      // The common causes are an expired Discord CDN link (signed URLs die at
+      // ~24h, so this is routine when replying to an older message) and a
+      // fetch timeout.
+      unreadable.push(`[attached ${kind}: ${att.name || 'file'}]${unreadableNote('the download failed, most likely an expired or unreachable Discord link')}`);
       continue;
     }
     // Re-check the total budget against real bytes — the pre-download check
     // used Discord metadata, which the per-file cap already refuses to trust.
     if (totalBytes + buf.byteLength > TOTAL_MEDIA_BYTES) {
       notices.push(`⚠ Skipped **${att.name}** — total media budget of ${fmtMB(TOTAL_MEDIA_BYTES)} per request reached.`);
+      unreadable.push(`[attached ${kind}: ${att.name || 'file'}]${unreadableNote('skipped, the request\'s total attachment budget was already full')}`);
       continue;
     }
     totalBytes += buf.byteLength;
@@ -271,6 +322,7 @@ export async function collectMediaFromMessage(
   for (const kind of Object.keys(skippedOverCount) as MediaKind[]) {
     if (skippedOverCount[kind] > 0) {
       notices.push(`⚠ Only the first ${maxCounts[kind]} ${kind}${maxCounts[kind] === 1 ? '' : 's'} per request ${maxCounts[kind] === 1 ? 'is' : 'are'} processed — skipped ${skippedOverCount[kind]} extra.`);
+      unreadable.push(`[${skippedOverCount[kind]} further attached ${kind}${skippedOverCount[kind] === 1 ? '' : 's'}]${unreadableNote(`only the first ${maxCounts[kind]} per request are read`)}`);
     }
   }
   // Attachments that failed classify() entirely (a .zip, a .txt) — nothing here
@@ -283,6 +335,6 @@ export async function collectMediaFromMessage(
   }
 
   return {
-    parts, kinds, fromReply: fromReplyFlags, placeholders, notices,
+    parts, kinds, fromReply: fromReplyFlags, placeholders, unreadable, notices,
   };
 }
