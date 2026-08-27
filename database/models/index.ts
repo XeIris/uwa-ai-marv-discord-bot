@@ -1,5 +1,6 @@
 import AiChatModel from './AiChatModel';
 import AiConsentModel from './AiConsentModel';
+import AiToolPreferenceModel from './AiToolPreferenceModel';
 import AiUsageModel from './AiUsageModel';
 import CommandConfigModel from './CommandConfigModel';
 import CommitteeModel from './CommitteeModel';
@@ -15,6 +16,7 @@ import ServerConfigModel from './ServerConfigModel';
 export {
   AiChatModel,
   AiConsentModel,
+  AiToolPreferenceModel,
   AiUsageModel,
   CommandConfigModel,
   CommitteeModel,

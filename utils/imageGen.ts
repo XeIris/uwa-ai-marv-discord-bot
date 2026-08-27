@@ -1,4 +1,5 @@
 import type { OpenAI } from 'openai';
+import { creditsForImages } from './aiPricing';
 import { log, logError } from './log';
 
 export const IMAGE_GEN_TOOL_NAME = 'generate_image';
@@ -7,7 +8,36 @@ export const IMAGE_GEN_DAILY_LIMIT = 5;
  * bursty spending (N images × N tool iterations) and matches the Imgen
  * model's single-composite output anyway. */
 export const IMAGE_EDIT_MAX_SOURCES = 1;
+/**
+ * Used only when the Imgen persona is missing from data/aiPersonas.json — a
+ * config fallback, not a runtime failover. Deliberately the hybrid Gemini model
+ * rather than the cheaper meta/muse-image: muse is an unlisted eval endpoint
+ * (see IMAGES_API_MODELS), so the last-resort default is the one that is in the
+ * public catalogue and can't quietly disappear.
+ */
 export const IMAGE_GEN_FALLBACK_MODEL = 'google/gemini-3.1-flash-lite-image';
+
+/**
+ * Models OpenRouter serves ONLY on `POST /api/v1/images` (a prompt plus optional
+ * `input_references`, never a message list). Sending one to chat/completions
+ * 404s with *"is an image generation model and cannot be used with the
+ * chat/completions endpoint"*.
+ *
+ * How to classify a model: it is images-endpoint-only when
+ * `GET /api/v1/models/<id>/endpoints` resolves but the id is absent from the
+ * plain `GET /api/v1/models` list. Hybrids that appear in both (the Gemini/GPT
+ * image models) keep working through chat/completions with `modalities`.
+ */
+const IMAGES_API_MODELS = new Set<string>(['meta/muse-image']);
+
+export function usesImagesEndpoint(model: string): boolean {
+  return IMAGES_API_MODELS.has(model);
+}
+
+/** Shape of the `POST /api/v1/images` response we rely on. */
+interface ImagesApiResponse {
+  data?: { b64_json?: string; media_type?: string }[];
+}
 
 /** Marv's own avatar, used as a character reference when he draws himself. */
 const SELF_PORTRAIT_PATH = `${import.meta.dir}/../data/marv-pfp.png`;
@@ -23,7 +53,8 @@ const TOOL_DESCRIPTION = 'Generate an image from a text prompt, or edit the sing
   + 'when the user explicitly asks you to generate, create, draw, or edit an image/picture — never for ordinary '
   + 'questions. The generated image is attached to your reply automatically; do not claim you cannot generate '
   + 'images, and do not write links or placeholders for it. '
-  + `Users are limited to ${IMAGE_GEN_DAILY_LIMIT} generations per 24 hours.`;
+  + `Users are limited to ${IMAGE_GEN_DAILY_LIMIT} generations per 24 hours, and each image also spends a large `
+  + 'share of their shared AI credit budget, so generate one image per request and never speculatively.';
 
 const USE_ATTACHED_DESCRIPTION = 'Set to true to use the image attached to the user\'s current message as the '
   + 'base for an edit/transformation (the prompt then describes the desired change). Only valid when the current '
@@ -159,7 +190,11 @@ export async function runImageGeneration(opts: {
   ctx: ImageGenContext;
   openrouter: OpenAI;
   model: string;
-  /** Output modalities — image-only models (Flux, Recraft) need ['image']; hybrids need ['image', 'text']. */
+  /**
+   * Output modalities for the chat/completions path — image-only models (Flux,
+   * Recraft) need ['image'], hybrids need ['image', 'text']. Ignored by
+   * images-endpoint models (see IMAGES_API_MODELS), which have no modality knob.
+   */
   modalities?: string[];
   args: Record<string, any>;
 }): Promise<ImageGenResult> {
@@ -237,60 +272,127 @@ export async function runImageGeneration(opts: {
     });
   };
 
-  log(`[imagegen] user ${ctx.userId} generating${useAttached ? ` (editing ${imageParts.length} attached image${imageParts.length === 1 ? '' : 's'})` : ''}${selfPortraitPart ? ' (self-portrait reference)' : ''}: ${prompt.slice(0, 120)}`);
-
-  // For edits (and self-portraits) the request carries the source images as
-  // multimodal content parts alongside the instruction text (base64 data URLs,
-  // never persisted). The portrait leads so it reads as the character reference.
-  const sourceParts = [
-    ...(selfPortraitPart ? [selfPortraitPart] : []),
-    ...(useAttached ? imageParts : []),
-  ];
-  const instruction = selfPortraitPart ? `${SELF_PORTRAIT_INSTRUCTION}${prompt}` : prompt;
-  const userContent = sourceParts.length > 0
-    ? [{ type: 'text', text: instruction }, ...sourceParts]
-    : instruction;
-
-  let dataUrl = '';
-  try {
-    const completion: any = await withTimeout(
-      openrouter.chat.completions.create({
-        model,
-        messages: [{ role: 'user', content: userContent }],
-        modalities,
-      } as any),
-      IMAGE_GEN_TIMEOUT_MS,
-      '[imagegen] generation',
-    );
-    dataUrl = completion?.choices?.[0]?.message?.images?.[0]?.image_url?.url ?? '';
-  } catch (err) {
-    logError('[imagegen] generation failed:', err);
-    await releaseQuota();
-    return { ok: false, error: 'Error: image generation failed. Tell the user to try again later.' };
+  // Image generation also draws on the shared AI credit budget
+  // (utils/aiPricing.ts). The per-day slot limit above only caps burst; this is
+  // what makes an image cost what it actually costs, so a member can't spend the
+  // budget on pictures that chat is metered for. Reserved before the call and
+  // released in a finally; the real charge lands via addImageUsage on success.
+  const imageCredits = creditsForImages(model);
+  const aiUsage = ctx.db?.aiUsage;
+  if (aiUsage && imageCredits > 0) {
+    const gate = aiUsage.tryReserve(ctx.userId, imageCredits);
+    if (!gate.ok) {
+      await releaseQuota();
+      return {
+        ok: false,
+        error: `Error: this user has run out of ${gate.reason === 'weekly' ? 'weekly' : 'daily'} AI credits, and an `
+          + 'image costs a large share of that budget. Do NOT retry — tell them to try again after their limit resets.',
+      };
+    }
   }
-
-  const match = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/is.exec(dataUrl);
-  if (!match) {
-    logError(`[imagegen] unexpected response format (no base64 data URL); got: ${dataUrl.slice(0, 80)}`);
-    await releaseQuota();
-    return { ok: false, error: 'Error: the image model returned no image. Tell the user to try again later.' };
-  }
-
-  const ext = match[1].split('/')[1].replace('jpeg', 'jpg');
-  const buffer = Buffer.from(match[2], 'base64');
-  if (buffer.length === 0 || buffer.length > MAX_IMAGE_BYTES) {
-    await releaseQuota();
-    return { ok: false, error: 'Error: the generated image could not be attached (empty or too large).' };
-  }
-
-  return {
-    ok: true,
-    attachment: { attachment: buffer, name: `imgen-${Date.now()}.${ext}` },
-    // "of you" survives a combined call — a self-portrait built on the user's
-    // attached image is still a picture of Marv, and the model shouldn't
-    // describe it as a plain edit.
-    resultText: `Image ${selfPortraitPart ? 'of you ' : ''}${useAttached ? 'edited' : 'generated'} successfully from prompt "${prompt.slice(0, 200)}". `
-      + 'It is attached to your reply automatically — do not write a link, markdown image, or placeholder for it; '
-      + 'just describe it briefly.',
+  const releaseCredits = () => {
+    if (aiUsage && imageCredits > 0) aiUsage.release(ctx.userId, imageCredits);
   };
+
+  const attempt = async (): Promise<ImageGenResult> => {
+    log(`[imagegen] user ${ctx.userId} generating on ${model}${useAttached ? ` (editing ${imageParts.length} attached image${imageParts.length === 1 ? '' : 's'})` : ''}${selfPortraitPart ? ' (self-portrait reference)' : ''}: ${prompt.slice(0, 120)}`);
+
+    // For edits (and self-portraits) the request carries the source images
+    // alongside the instruction text (base64 data URLs, never persisted). The
+    // portrait leads so it reads as the character reference.
+    const sourceParts = [
+      ...(selfPortraitPart ? [selfPortraitPart] : []),
+      ...(useAttached ? imageParts : []),
+    ];
+    const instruction = selfPortraitPart ? `${SELF_PORTRAIT_INSTRUCTION}${prompt}` : prompt;
+
+    // Both endpoints return the bytes base64-encoded; only the envelope differs.
+    let base64 = '';
+    let mime = '';
+    try {
+      if (usesImagesEndpoint(model)) {
+        // Dedicated image model: a bare prompt, with any reference images passed
+        // as input_references. Those take the same { type: 'image_url',
+        // image_url: { url } } parts the chat path sends, so sourceParts goes
+        // straight in.
+        const body: Record<string, any> = { model, prompt: instruction, n: 1 };
+        if (sourceParts.length > 0) body.input_references = sourceParts;
+        const res = await withTimeout(
+          openrouter.post<ImagesApiResponse>('/images', { body }),
+          IMAGE_GEN_TIMEOUT_MS,
+          '[imagegen] generation',
+        );
+        const first = res?.data?.[0];
+        base64 = typeof first?.b64_json === 'string' ? first.b64_json : '';
+        // The endpoint honours output_format; we take whatever it chose (webp today).
+        mime = typeof first?.media_type === 'string' ? first.media_type : '';
+      } else {
+        // Hybrid chat model: the source images ride as multimodal content parts.
+        const userContent = sourceParts.length > 0
+          ? [{ type: 'text', text: instruction }, ...sourceParts]
+          : instruction;
+        const completion: any = await withTimeout(
+          openrouter.chat.completions.create({
+            model,
+            messages: [{ role: 'user', content: userContent }],
+            modalities,
+          } as any),
+          IMAGE_GEN_TIMEOUT_MS,
+          '[imagegen] generation',
+        );
+        const dataUrl: string = completion?.choices?.[0]?.message?.images?.[0]?.image_url?.url ?? '';
+        const match = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/is.exec(dataUrl);
+        if (match) {
+          [, mime, base64] = match;
+        } else if (dataUrl) {
+          // Truncate at the base64 marker so provider error text stays debuggable
+          // without ever writing image bytes to the log.
+          const preview = dataUrl.slice(0, 80).replace(/(base64,).*/is, '$1...');
+          logError(`[imagegen] unexpected response format (no base64 data URL); ${dataUrl.length} chars, got: ${preview}`);
+        }
+      }
+    } catch (err) {
+      logError('[imagegen] generation failed:', err);
+      await releaseQuota();
+      return { ok: false, error: 'Error: image generation failed. Tell the user to try again later.' };
+    }
+
+    if (!base64 || !/^image\/[a-z0-9.+-]+$/i.test(mime)) {
+      logError(`[imagegen] no usable image in the response from ${model} (${base64.length} base64 chars, media type "${mime}")`);
+      await releaseQuota();
+      return { ok: false, error: 'Error: the image model returned no image. Tell the user to try again later.' };
+    }
+
+    const ext = mime.split('/')[1].toLowerCase().replace('jpeg', 'jpg');
+    const buffer = Buffer.from(base64, 'base64');
+    if (buffer.length === 0 || buffer.length > MAX_IMAGE_BYTES) {
+      await releaseQuota();
+      return { ok: false, error: 'Error: the generated image could not be attached (empty or too large).' };
+    }
+
+    return {
+      ok: true,
+      attachment: { attachment: buffer, name: `imgen-${Date.now()}.${ext}` },
+      // "of you" survives a combined call — a self-portrait built on the user's
+      // attached image is still a picture of Marv, and the model shouldn't
+      // describe it as a plain edit.
+      resultText: `Image ${selfPortraitPart ? 'of you ' : ''}${useAttached ? 'edited' : 'generated'} successfully from prompt "${prompt.slice(0, 200)}". `
+        + 'It is attached to your reply automatically — do not write a link, markdown image, or placeholder for it; '
+        + 'just describe it briefly.',
+    };
+  };
+
+  try {
+    const result = await attempt();
+    if (result.ok && aiUsage && imageCredits > 0) {
+      // Charged only for images that actually shipped — failures released the
+      // slot above and must not bill the user either.
+      await aiUsage.addImageUsage(ctx.userId, model, 1).catch((err: any) => {
+        logError('[imagegen] failed to record image credit usage:', err);
+      });
+    }
+    return result;
+  } finally {
+    releaseCredits();
+  }
 }

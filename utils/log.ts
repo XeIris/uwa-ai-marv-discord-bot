@@ -41,8 +41,25 @@ function handleUncaughtException(error: Error): void {
   logError('----- UNCAUGHT EXCEPTION: -----', error);
 }
 
+/**
+ * Bun 1.4 makes an unawaited rejected promise fatal by default: with no
+ * listener the process exits 1. Plenty of this bot's work is deliberately not
+ * awaited — the event scheduler's ticks, the keyword handler, the interaction
+ * dispatcher — so a single rejection in any of them would take the whole bot
+ * down and leave Docker to restart it.
+ *
+ * Swallowing can mask a genuinely broken state, so the reason is always written
+ * to logs_error.txt. This is the same trade the codebase already makes for sync
+ * throws in handleUncaughtException above; it's a backstop, not a substitute for
+ * catching failures where they happen and giving them a name in the log.
+ */
+function handleUnhandledRejection(reason: unknown): void {
+  logError('----- UNHANDLED REJECTION: -----', reason);
+}
+
 process.on('uncaughtException', handleUncaughtException);
-log('Catching uncaught exceptions...');
+process.on('unhandledRejection', handleUnhandledRejection);
+log('Catching uncaught exceptions and unhandled rejections...');
 
 export {
   log,

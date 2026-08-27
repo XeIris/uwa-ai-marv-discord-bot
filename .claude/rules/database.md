@@ -46,7 +46,12 @@ personaName)`, `db.aiUsage.addUsage(...)`.
   data notice they accepted; absence means no consent and no generation. See
   `.claude/rules/ai-limits.md`.
 - **Credit metering:** `AiUsage` (audit log, raw tokens + derived USD cost) + `AiRateLimitWindow`
-  (`tokens` column stores credits) via `db.aiUsage` — see `.claude/rules/ai-limits.md`.
+  (`tokens` column stores credits) via `db.aiUsage` — see `.claude/rules/ai-limits.md`. Generated
+  images log a zero-token row here too.
+- **AI tool switches:** `AiToolPreference` (`db.aiTools`, PK `(user_id, tool)`) — per-user on/off
+  for Marv's optional tools. Stores **exceptions only**: every tool is on by default, so a missing
+  row means enabled and a user who has never run `/ai tools` has no rows. `tool` is whitelisted
+  against `AI_TOOL_KEYS` before it reaches SQL. See `.claude/rules/ai-limits.md`.
 - **Per-guild settings:** `ServerConfig` (`db.serverConfig`, keyed by `server_id` + `key`) — named
   roles use `role:<name>` keys; `messageReactsEnabled` gates the AI keyword trigger, so don't make
   the Marv keyword reply depend on it silently. `CommandConfig` stays separate, for per-guild

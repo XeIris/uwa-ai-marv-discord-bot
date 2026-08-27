@@ -8,7 +8,7 @@ Not a GitHub fork and no shared commit history (squashed import), so upstream ch
 `git cherry-pick` from the `upstream` remote, never by merge. Upstream is **unlicensed** — don't
 copy its code into anything else without asking its authors first.
 
-**Last updated: 2026-08-23**
+**Last updated: 2026-08-27**
 
 > **Maintenance rule.** Edit agent docs only on *substantive architectural* change — new
 > architecture, new auth, new data flows/services, schema or security-model changes, or when
@@ -26,7 +26,7 @@ duplicate their content here.
 | Working on | Loads |
 | ------ | ------ |
 | `database/**` | `.claude/rules/database.md` — DAO layering, transactions, settings tables |
-| `utils/ai.ts`, `utils/aiPricing.ts`, `utils/aiModeration.ts`, `utils/aiSessionLock.ts`, `utils/llmRetry.ts`, `utils/aiConsent.ts`, `commands/ai*.ts`, `commands/summary_*.ts`, `AiUsageModel` | `.claude/rules/ai-limits.md` — credit metering, model routing, content-safety moderation, consent gate, retry policy |
+| `utils/ai.ts`, `utils/aiPricing.ts`, `utils/aiTools.ts`, `utils/aiModeration.ts`, `utils/aiSessionLock.ts`, `utils/llmRetry.ts`, `utils/aiConsent.ts`, `utils/imageGen.ts`, `commands/ai*.ts`, `commands/summary_*.ts`, `AiUsageModel`, `AiToolPreferenceModel` | `.claude/rules/ai-limits.md` — credit metering, image pricing + transport, model routing, per-user tool switches, content-safety moderation, consent gate, retry policy |
 | `commands/committee_*`, `commands/event_*`, `utils/clubInfo.ts`, the club models | `.claude/rules/club-data.md` — roster, events, constitution |
 | `utils/diagramGen.ts`, `data/skills/diagram-guide.md`, `scripts/fetch-fonts.ts` | `.claude/rules/diagrams.md` — render_diagram, markup allowlists |
 | `utils/welcomeCard.ts`, `classes/handlers/welcomeHandler.ts`, `commands/dev_welcome_test.ts` | `.claude/rules/welcome.md` — join welcome card |
@@ -65,8 +65,8 @@ in the DB `GlobalConfig` table and override/augment env.
 
 **AI features:** keyword-triggered AI chat (say `marv` → the bot replies as itself via
 `classes/handlers/keywordsBehaviorHandler.ts` → `utils/ai.ts`), per-user chat sessions
-(`/ai view|chatnew|chatswitch|chatdelete|retitle|forget`, `AiChatModel`), credit metering (`/ai usage`,
-`AiUsageModel`), AI chat summaries (`/summary count|time`), the web-search / image-generation /
+(`/ai view|chatnew|chatswitch|chatdelete|retitle|tools|forget`, `AiChatModel`), credit metering (`/ai usage`,
+`AiUsageModel`), per-user tool switches (`/ai tools`, on by default, `AiToolPreferenceModel`), AI chat summaries (`/summary count|time`), the web-search / image-generation /
 music-generation (JAYDON) / diagram-rendering tools that ride along in chat, and opt-in
 content-safety moderation (`ai_moderation` in GlobalConfig, off by default) that screens every turn
 through an NVIDIA Nemotron classifier. Personas live in
@@ -82,6 +82,7 @@ reference sheets (official links — also `/links`, UWA key dates, student perks
 handbook unit lookup. Marv is **dual-routed** — image turns take a different model from text turns;
 the models and the routing rationale live in `.claude/rules/ai-limits.md`. He is summoned by his
 bare name (`marv`/`asimarv`, no sigil), matched on word boundaries so "marvel" doesn't summon him.
+In-chat flags: `-n` starts a fresh session, `-f` forgets the last turn (`utils/sessionFlag.ts`).
 Every user prompt is also tagged
 `[date]-[committee title]-[username]-` so he knows who he's talking to. **Marv answers as the bot
 user itself** — a native Discord reply to the summoning message, no webhook impersonation, because

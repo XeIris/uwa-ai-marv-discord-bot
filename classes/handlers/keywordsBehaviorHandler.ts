@@ -15,9 +15,10 @@ import { IMAGE_GEN_TOOL_NAME, IMAGE_EDIT_MAX_SOURCES } from '../../utils/imageGe
 import { MUSIC_GEN_TOOL_NAME, MUSIC_GUIDE_TOOL_NAME } from '../../utils/musicGen';
 import { DIAGRAM_GEN_TOOL_NAME, DIAGRAM_GUIDE_TOOL_NAME } from '../../utils/diagramGen';
 import { CLUB_TOOL_NAMES, perthDateString } from '../../utils/clubInfo';
-import { parseNewSessionFlag } from '../../utils/sessionFlag';
+import { parseSessionFlags } from '../../utils/sessionFlag';
 import { trimHistoryToFit } from '../../utils/tokenizer';
-import { extractPdfsFromMessage } from '../../utils/pdf';
+import { extractPdfsFromMessage, messageHasPdf } from '../../utils/pdf';
+import { defaultAiTools } from '../../utils/aiTools';
 import {
   collectMediaFromMessage, hasQualifyingMedia, tryAcquireMediaSlot, releaseMediaSlot,
   type MediaKind,
@@ -51,8 +52,14 @@ const scriptHandlers = {
     );
     if (!consented) return;
 
-    // `-n` requests a fresh session and is stripped before the model sees it.
-    const { requested: shouldStartNewSession, text: query } = parseNewSessionFlag(message.content || '');
+    // `-n` (fresh session) and `-f` (forget the last turn) are both stripped
+    // before the model sees the message. Each is a standalone command: the
+    // handler acts on it and returns rather than also answering.
+    const {
+      newSession: shouldStartNewSession,
+      forgetLast: shouldForgetLastTurn,
+      text: query,
+    } = parseSessionFlags(message.content || '');
 
     const contextMsg = message.reference
       ? await message.channel.messages
@@ -93,6 +100,62 @@ const scriptHandlers = {
       return;
     }
 
+    // `-f` — drop the last turn. Runs under the session lock so it can't race a
+    // generation that is mid-flight on the same conversation. `-n` wins when
+    // both flags are present: a fresh session already discards the last turn.
+    if (shouldForgetLastTurn && hasMemory) {
+      try {
+        const existing = await (message.client as any).db.aiChat.getOrCreateSession(
+          message.author.id,
+          displayName,
+        );
+        const undo: { ok: boolean; reason?: string; userMessage?: string } = existing
+          ? await withAiSessionLock(
+            existing.sessionId,
+            () => (message.client as any).db.aiChat.undoLastTurn(message.author.id, displayName),
+          )
+          : { ok: false, reason: 'no_session' };
+
+        if (!undo.ok) {
+          const reasons: Record<string, string> = {
+            no_session: `No active **${displayName}** conversation to forget anything from.`,
+            empty: `Your **${displayName}** conversation has no messages yet.`,
+            paused: `This **${displayName}** conversation is paused. Forgetting a turn won't unpause it — start a new one with \`-n\`.`,
+          };
+          await message.reply({
+            embeds: [
+              new EmbedBuilder()
+                .setColor('#FEE75C')
+                .setTitle('Nothing Forgotten')
+                .setDescription(reasons[undo.reason ?? 'no_session'] ?? reasons.no_session),
+            ],
+            allowedMentions: { repliedUser: false },
+          });
+          return;
+        }
+
+        const preview = String(undo.userMessage ?? '').replace(/\s+/g, ' ').trim();
+        const snippet = preview.length > 120 ? `${preview.slice(0, 117)}…` : preview;
+        await message.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor('#57F287')
+              .setTitle('Last Turn Forgotten')
+              .setDescription(
+                `Dropped your last message to **${displayName}** and the reply to it.${
+                  snippet ? `\n\n> ${snippet}` : ''}`,
+              )
+              .setFooter({ text: 'The rest of the conversation is untouched. Use "-n" to start over entirely.' }),
+          ],
+          allowedMentions: { repliedUser: false },
+        });
+      } catch (undoErr) {
+        logError('AiChat: Failed to undo the last turn from mention handler:', undoErr);
+        await message.reply('Failed to forget the last turn. Please try again.');
+      }
+      return;
+    }
+
     // Resolve the session row before the lock: its id is the lock key. The
     // history load + trim runs inside the locked turn — it needs the prompt and
     // the media decision, both computed only after the media slot is acquired.
@@ -116,7 +179,24 @@ const scriptHandlers = {
     // media slot (and the bytes) for the entire wait. Memoryless personas have
     // no session to lock and nothing to persist, so they run unserialized.
     const runTurn = async () => {
-      const { blocks: pdfBlocks, notices: pdfNotices } = await extractPdfsFromMessage(message);
+      // Per-user tool switches (utils/aiTools.ts). Everything is on by default;
+      // these only ever SUBTRACT, so a persona that was never granted web search
+      // still gets none, and the club tools aren't switchable at all.
+      const enabledTools = hasMemory
+        ? await (message.client as any).db.aiTools.resolve(message.author.id)
+        : defaultAiTools();
+
+      // PDF reading off: don't spawn the extractor at all, but say so rather
+      // than silently ignoring an attachment the member clearly meant to send.
+      const pdfNotices: string[] = [];
+      let pdfBlocks: string[] = [];
+      if (enabledTools.pdf) {
+        const extracted = await extractPdfsFromMessage(message);
+        pdfBlocks = extracted.blocks;
+        pdfNotices.push(...extracted.notices);
+      } else if (messageHasPdf(message)) {
+        pdfNotices.push('⚠ PDF reading is turned off for you, so your attachment was ignored. Turn it back on with `/ai tools tool:pdf option:enable`.');
+      }
 
       // Media (image/video/audio) attachments. Two consumers:
       //  - vision input (mediaParts → the chat model's user turn): persona-gated
@@ -138,7 +218,7 @@ const scriptHandlers = {
       // images only. Anything outside this set is collected only if the
       // generate_image edit path can still use it.
       const visionKinds = getPersonaMediaKinds(persona);
-      const imageGenEnabled = hasMemory;
+      const imageGenEnabled = hasMemory && enabledTools.imagegen;
       const collectKinds = [...new Set<MediaKind>([
         ...visionKinds,
         ...(imageGenEnabled ? ['image' as MediaKind] : []),
@@ -370,14 +450,14 @@ const scriptHandlers = {
           systemPrompt: persona.systemPrompt ?? '',
           prompt,
           history,
-          webSearchEnabled: persona.webSearchEnabled,
+          webSearchEnabled: persona.webSearchEnabled && enabledTools.websearch,
           mediaParts: withMedia ? mediaParts : [],
           // Image generation is Discord-only (delivery rides this reply); the
           // rate limit is keyed to the requesting Discord user. Attached images
           // ride along as edit sources for the generate_image tool. The
           // self-portrait reference rides the same clubTools gate as Marv's other
           // extras — it's his avatar, so no other persona should draw "itself".
-          imageGen: hasMemory
+          imageGen: imageGenEnabled
             ? {
               userId: message.author.id,
               db: (message.client as any).db,
@@ -387,12 +467,12 @@ const scriptHandlers = {
             : undefined,
           // Music generation rides the same reply delivery; rate limit keyed
           // to the requesting Discord user.
-          musicGen: hasMemory
+          musicGen: (hasMemory && enabledTools.musicgen)
             ? { userId: message.author.id, db: (message.client as any).db }
             : undefined,
           // Diagram rendering rides the same reply delivery; rate limit keyed
           // to the requesting Discord user.
-          diagramGen: hasMemory
+          diagramGen: (hasMemory && enabledTools.diagrams)
             ? { userId: message.author.id, db: (message.client as any).db }
             : undefined,
           // Club data (constitution, roster, events) is per-guild and only offered

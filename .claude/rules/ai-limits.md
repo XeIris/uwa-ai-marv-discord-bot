@@ -6,16 +6,22 @@ paths:
   - "utils/aiSessionLock.ts"
   - "utils/llmRetry.ts"
   - "utils/aiConsent.ts"
+  - "utils/sessionFlag.ts"
+  - "database/models/AiChatModel.ts"
   - "commands/ai*.ts"
   - "commands/summary_*.ts"
   - "classes/handlers/keywordsBehaviorHandler.ts"
   - "database/models/AiUsageModel.ts"
   - "database/models/AiConsentModel.ts"
+  - "utils/aiTools.ts"
+  - "utils/imageGen.ts"
+  - "commands/ai_tools.ts"
+  - "database/models/AiToolPreferenceModel.ts"
 ---
 
 # AI usage limits, routing, moderation, consent & retry
 
-`utils/ai.ts`, `utils/aiPricing.ts`, `AiUsageModel`.
+`utils/ai.ts`, `utils/aiPricing.ts`, `utils/aiTools.ts`, `AiUsageModel`, `AiToolPreferenceModel`.
 
 Per-user fixed windows (`DAILY_LIMIT` / `WEEKLY_LIMIT` in `utils/ai.ts`) metered in **credits**, not
 raw tokens:
@@ -44,6 +50,21 @@ Enforcement is `db.aiUsage.tryReserve(userId, estCredits)` → `release()` in `f
 in-memory in-flight reservation held for the whole generation so concurrent spam can't all pass the
 check before usage lands. **No dev bypass — everyone is metered.**
 
+### Generated images
+
+Image models are billed **per image**, not per token, so they can't ride the multipliers.
+`MODEL_USD_PER_IMAGE` holds the list price and `creditsForImages()` converts it at the same
+$0.28/M = 1x base, times `IMAGE_CREDIT_MULTIPLIER` (1.5x). `runImageGeneration` reserves before the
+call, releases in a `finally`, and charges via `addImageUsage` **only when an image actually
+shipped** — the audit row logs zero tokens and the true list cost, so `AiUsage.cost` stays a
+real-money ledger while the window carries the surcharge.
+
+An unpriced image model bills **nothing** — a new one must be added to `MODEL_USD_PER_IMAGE` or it
+generates for free. Today: `meta/muse-image` $0.01 (53,571 credits) and
+`google/gemini-3.1-flash-lite-image` $0.03363 (180,161 credits), against a 250k daily budget.
+
+`IMAGE_GEN_DAILY_LIMIT` (5/day) still applies on top — it caps burst, the credits cap spend.
+
 ## Retry
 
 All OpenRouter chat calls go through `createChatCompletionWithRetry` (`utils/llmRetry.ts`):
@@ -69,7 +90,10 @@ on the text route.
 `providerRouting` on Marv sorts DeepSeek endpoints by price with `data_collection: "deny"` and
 `require_parameters: true` (tools must be supported). That routing is why
 `CONTEXT_LIMITS['deepseek/deepseek-v4-flash-0731']` in `utils/tokenizer.ts` is 256k, not the
-advertised 1M: the cheap endpoints are the small-context ones.
+advertised 1M — a deliberately conservative floor, since `require_parameters` and price sorting can
+land the turn on a small-context endpoint (CoreWeave and Reka both serve 256k). Note the *cheapest*
+endpoints today serve the full 1M, so the 256k budget currently trims harder than it needs to; a
+retune wants live endpoint data, not a guess.
 
 `reasoning` / `visionReasoning` are the same idea for OpenRouter's `reasoning` body field. Marv's
 text route sets `{ "enabled": false }`: DeepSeek V4 Flash otherwise spends ~150 reasoning tokens and
@@ -78,10 +102,84 @@ tokens, and tool calling is unaffected either way. The **music composing turn is
 request builder skips the override once `musicGuideRead` is set, because working out an arrangement
 is the one place thinking pays for itself.
 
-**Credit multipliers were deliberately not retuned for the swap** — `aiPricing.ts` still bills
-DeepSeek at 0.5x/1x, which is generous against what price-sorted routing actually costs. Real spend
-is therefore *below* what `AiUsage.cost` records; that column is an upper bound, and it also ignores
-provider-side prompt caching.
+DeepSeek V4 Flash bills at **0.29x/0.64x** ($0.08/M in, $0.18/M out). The slug is served by ~28
+OpenRouter endpoints spanning $0.03–$0.44 in and $0.10–$1.32 out, and Marv routes it by price with
+fallbacks, so there is no single true rate: the table is pegged to the 5th-cheapest endpoint, which
+covers the realistic landing band without charging ceiling prices on the common path. (It billed
+0.5x/1x until 2026-08-27 — the rate of a slug we no longer use, a ~2.3x overcharge.) `AiUsage.cost`
+still ignores provider-side prompt caching, so it remains an upper bound.
+
+## Image generation transport
+
+`runImageGeneration` picks its transport per model. `IMAGES_API_MODELS` (`utils/imageGen.ts`) lists
+the ids OpenRouter serves **only** on `POST /api/v1/images` — `meta/muse-image` today, which is what
+Imgen runs on. Those get `{ model, prompt, n }`, with reference images (attached-image edits and
+Marv's self-portrait) as `input_references`, taking the exact `image_url` parts `utils/aiMedia.ts`
+already builds. Hybrids (the Gemini/GPT image models) keep going through `chat/completions` with
+`modalities`. Sending an images-only model to `chat/completions` 404s.
+
+**How to classify one:** it is images-endpoint-only when `GET /api/v1/models/<id>/endpoints`
+resolves but the id is absent from the plain `GET /api/v1/models` list. muse-image is such a model —
+an unlisted eval endpoint (`muse-image-1.0-eval-*`), which is why `IMAGE_GEN_FALLBACK_MODEL` stays
+the publicly-listed Gemini model rather than following Imgen to muse.
+
+Both envelopes converge on `{ base64, mime }` before the size/attachment checks, and the extension
+comes from the endpoint's own `media_type` (webp for muse). `aiModeration`'s
+`GENERATED_IMAGE_MIMES` whitelists webp, so generated images are still screened.
+
+## Per-user tool switches
+
+`/ai tools tool:<name> option:<enable|disable|view>` — per user, global across servers, backed by
+`AiToolPreference` (`db.aiTools`). Keys live in `AI_TOOL_KEYS` (`utils/aiTools.ts`): `websearch`,
+`imagegen`, `musicgen`, `diagrams`, `pdf`. `all` is a **command target only, never a stored key**,
+and every key is whitelisted before it reaches SQL.
+
+**Everything is ON by default** — a missing row means enabled, and the table stores exceptions only.
+This is the deliberate inverse of upstream, which defaults everything off: Marv exists to be useful
+to club members who will never read a settings command.
+
+**Club tools are not switchable.** The constitution, roster, events, reference sheets and unit
+lookup are this fork's reason to exist and Marv's only source of truth about the club.
+
+`resolve()` fails to the **default (all on)**, not all-off, and logs. These are preferences, not a
+safety control — an unreadable exceptions table means "no known exceptions", and silently stripping
+web search and image generation mid-conversation on a transient DB error is the worse failure.
+
+The switches only ever **subtract**: a persona without `webSearchEnabled` still gets no web search,
+and a memoryless persona still gets nothing. Wired into `keywordsBehaviorHandler` (the only
+tool-bearing surface); `/summary` uses no tools. With `pdf` off, an attached PDF gets a notice
+saying how to turn it back on rather than being silently dropped.
+
+## System prompt
+
+No wall-clock timestamp goes in the system prompt. The date line changes once a day; a timestamp
+changes every request, which busts the provider's prompt cache on every single turn for the whole
+system prompt — and the user's own message already carries a UTC timestamp
+(`formatMessageWithTimestamp`). **Don't re-add a `(System clock: ...)` line.**
+
+The `<<PDF_ATTACHMENT>>` untrusted-content paragraph is conditional: it is only included on turns
+whose prompt or replayed history actually contains `PDF_ATTACHMENT_MARKER` (`utils/pdf.ts`).
+
+## Chat flags
+
+`utils/sessionFlag.ts` parses single-letter flags off the message before the model sees it, and
+`parseSessionFlags` strips every one it knows:
+
+- **`-n`** — start a fresh session (`startNewSession`).
+- **`-f`** — forget the last turn (`AiChatModel.undoLastTurn`): the user's last message, the reply
+  to it, and any `tool` audit rows in between. History rows are only ever appended, so "id >= the
+  newest `user` row" is exactly the trailing turn; the read and the delete share a transaction and
+  the caller holds the session lock.
+
+Both are **standalone commands** — the handler acts and returns rather than also answering. `-n`
+wins when both are present, since a fresh session already discards the last turn.
+
+`-f` **refuses on a moderation-paused session**. Deleting history wouldn't clear
+`moderation_flagged` either way, but refusing keeps `-f` from looking like a way out of a pause.
+
+These replace the base repo's bare command words ("kys", "amnesia"), which matched anywhere in a
+message and fired on ordinary sentences containing them. **A new chat command should be a flag
+here, not a word the model could see.**
 
 ## Content-safety moderation
 

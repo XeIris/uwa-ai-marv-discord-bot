@@ -234,6 +234,49 @@ class AiChatModel {
   }
 
   /**
+   * Drops the most recent turn from a user's active session with a persona —
+   * their last message, the reply to it, and any `tool` audit rows recorded in
+   * between. This is `marv -f` (see utils/sessionFlag.ts).
+   *
+   * History rows are only ever appended, so "everything with an id at or above
+   * the newest `user` row" is exactly the trailing turn. The read and the delete
+   * run in one transaction so a concurrent write can't land between them; the
+   * caller additionally holds the session lock.
+   *
+   * Refuses on a session paused by the content-safety screen. Deleting history
+   * would not clear `moderation_flagged` — the session stays paused either way —
+   * but refusing keeps `-f` from looking like a way out of a pause.
+   */
+  async undoLastTurn(userId: string, personaName: string): Promise<{
+    ok: boolean;
+    reason?: 'no_session' | 'empty' | 'paused';
+    userMessage?: string;
+  }> {
+    const session = await this.db.executeSelectQuery(
+      aiChatQueries.GET_ACTIVE_SESSION,
+      [userId, personaName],
+    );
+    if (!session) return { ok: false, reason: 'no_session' };
+    if (Number(session.moderationFlagged ?? 0) === 1) return { ok: false, reason: 'paused' };
+
+    const sessionId = Math.trunc(Number(session.sessionId));
+    if (!Number.isInteger(sessionId) || sessionId <= 0) {
+      logError(`AiChat: refusing to undo a turn on invalid session id ${String(session.sessionId)}`);
+      return { ok: false, reason: 'no_session' };
+    }
+
+    return this.db.executeTransaction((rawDb: any) => {
+      const last = rawDb.query(aiChatQueries.GET_LAST_USER_TURN).get(sessionId);
+      if (!last) return { ok: false, reason: 'empty' as const };
+
+      const result = rawDb.query(aiChatQueries.DELETE_HISTORY_FROM).run(sessionId, last.id);
+      if (!result || result.changes === 0) return { ok: false, reason: 'empty' as const };
+
+      return { ok: true, userMessage: String(last.message ?? '') };
+    });
+  }
+
+  /**
    * Fetches the last N messages for a session, returned in chronological order (oldest first).
    * Capped at 30 by default per cost constraints.
    */

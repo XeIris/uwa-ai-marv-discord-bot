@@ -2,6 +2,7 @@ import aiChatHistoryTable from './aiChatHistoryTable';
 import aiChatSessionTable from './aiChatSessionTable';
 import aiConsentTable from './aiConsentTable';
 import aiRateLimitWindowTable from './aiRateLimitWindowTable';
+import aiToolPreferenceTable from './aiToolPreferenceTable';
 import aiUsageTable from './aiUsageTable';
 import commandConfigTable from './commandConfigTable';
 import committeeTable from './committeeTable';
@@ -19,6 +20,7 @@ export {
   aiChatSessionTable,
   aiConsentTable,
   aiRateLimitWindowTable,
+  aiToolPreferenceTable,
   aiUsageTable,
   commandConfigTable,
   committeeTable,

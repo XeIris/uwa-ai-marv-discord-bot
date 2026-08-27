@@ -36,7 +36,7 @@
       "name": "Imgen",
       "triggers": [],
       "provider": "openrouter",
-      "model": "google/gemini-3.1-flash-lite-image",
+      "model": "meta/muse-image",
       "responseModalities": [
         "image"
       ]

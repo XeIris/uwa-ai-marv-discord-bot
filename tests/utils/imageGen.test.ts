@@ -3,8 +3,10 @@ import {
   imageGenToolDef,
   runImageGeneration,
   resetSelfPortraitCache,
+  usesImagesEndpoint,
   type ImageGenContext,
 } from '../../utils/imageGen';
+import { creditsForImages } from '../../utils/aiPricing';
 
 // 1x1 transparent PNG — whatever the fake image model "returns".
 const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=';
@@ -116,5 +118,190 @@ describe('runImageGeneration self-portrait', () => {
     expect(content).toHaveLength(3);
     expect(content[0].text).toContain('Asimarv');
     expect(content[2]).toBe(attached);
+  });
+});
+
+describe('images-endpoint transport', () => {
+  test('classifies muse-image as images-endpoint-only, hybrids as chat', () => {
+    expect(usesImagesEndpoint('meta/muse-image')).toBe(true);
+    expect(usesImagesEndpoint('google/gemini-3.1-flash-lite-image')).toBe(false);
+    expect(usesImagesEndpoint('test/imgen')).toBe(false);
+  });
+
+  test('posts a bare prompt to /images and reads the b64_json envelope', async () => {
+    const db = fakeDb();
+    const posted: { path: string | null; body: any } = { path: null, body: null };
+    const client: any = {
+      post: async (path: string, opts: any) => {
+        posted.path = path;
+        posted.body = opts.body;
+        return { data: [{ b64_json: TINY_PNG, media_type: 'image/webp' }] };
+      },
+      chat: { completions: { create: async () => { throw new Error('must not use chat/completions'); } } },
+    };
+
+    const result = await runImageGeneration({
+      ctx: { userId: 'u1', db },
+      openrouter: client,
+      model: 'meta/muse-image',
+      args: { prompt: 'a cat' },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(posted.path).toBe('/images');
+    expect(posted.body).toEqual({ model: 'meta/muse-image', prompt: 'a cat', n: 1 });
+    expect(posted.body.messages).toBeUndefined();
+    // The extension comes from the endpoint's own media_type, not a data URL.
+    if (result.ok) expect(result.attachment.name.endsWith('.webp')).toBe(true);
+  });
+
+  test('edit sources ride as input_references, not as message parts', async () => {
+    const db = fakeDb();
+    const part = { type: 'image_url', image_url: { url: `data:image/png;base64,${TINY_PNG}` } };
+    const posted: { body: any } = { body: null };
+    const client: any = {
+      post: async (_path: string, opts: any) => {
+        posted.body = opts.body;
+        return { data: [{ b64_json: TINY_PNG, media_type: 'image/webp' }] };
+      },
+    };
+
+    const result = await runImageGeneration({
+      ctx: { userId: 'u1', db, imageParts: [part] },
+      openrouter: client,
+      model: 'meta/muse-image',
+      args: { prompt: 'make it daylight', use_attached_images: true },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(posted.body.input_references).toEqual([part]);
+  });
+
+  test('a response with no usable image releases the slot', async () => {
+    const db = fakeDb();
+    const client: any = { post: async () => ({ data: [{}] }) };
+
+    const result = await runImageGeneration({
+      ctx: { userId: 'u1', db },
+      openrouter: client,
+      model: 'meta/muse-image',
+      args: { prompt: 'a cat' },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(db.calls.failed).toBe(1);
+  });
+
+  test('a bogus media_type is rejected rather than becoming a filename', async () => {
+    const db = fakeDb();
+    const client: any = {
+      post: async () => ({ data: [{ b64_json: TINY_PNG, media_type: '../../etc/passwd' }] }),
+    };
+
+    const result = await runImageGeneration({
+      ctx: { userId: 'u1', db },
+      openrouter: client,
+      model: 'meta/muse-image',
+      args: { prompt: 'a cat' },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(db.calls.failed).toBe(1);
+  });
+});
+
+describe('credit metering', () => {
+  function fakeMeteredDb(reserveOk = true) {
+    const base = fakeDb();
+    const usage = {
+      reserved: [] as number[], released: [] as number[], charged: [] as any[],
+    };
+    return {
+      usage,
+      db: {
+        ...base,
+        aiUsage: {
+          tryReserve: (_u: string, credits: number) => {
+            usage.reserved.push(credits);
+            return reserveOk ? { ok: true } : { ok: false, reason: 'daily' };
+          },
+          release: (_u: string, credits: number) => { usage.released.push(credits); },
+          addImageUsage: async (u: string, m: string, n: number) => {
+            usage.charged.push([u, m, n]);
+          },
+        },
+      },
+      calls: base.calls,
+    };
+  }
+
+  test('reserves before the call, charges once, and always releases', async () => {
+    const { db, usage, calls } = fakeMeteredDb();
+    const client: any = {
+      post: async () => ({ data: [{ b64_json: TINY_PNG, media_type: 'image/webp' }] }),
+    };
+
+    const result = await runImageGeneration({
+      ctx: { userId: 'u1', db },
+      openrouter: client,
+      model: 'meta/muse-image',
+      args: { prompt: 'a cat' },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(usage.reserved).toEqual([creditsForImages('meta/muse-image')]);
+    expect(usage.released).toEqual([creditsForImages('meta/muse-image')]);
+    expect(usage.charged).toEqual([['u1', 'meta/muse-image', 1]]);
+    expect(calls.failed).toBe(0);
+  });
+
+  test('a failed generation releases the reservation and charges nothing', async () => {
+    const { db, usage, calls } = fakeMeteredDb();
+    const client: any = { post: async () => { throw new Error('provider exploded'); } };
+
+    const result = await runImageGeneration({
+      ctx: { userId: 'u1', db },
+      openrouter: client,
+      model: 'meta/muse-image',
+      args: { prompt: 'a cat' },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(usage.released.length).toBe(1);
+    expect(usage.charged).toEqual([]);
+    expect(calls.failed).toBe(1);
+  });
+
+  test('an exhausted credit budget blocks the call and returns the slot', async () => {
+    const { db, usage, calls } = fakeMeteredDb(false);
+    const client: any = { post: async () => { throw new Error('must not be called'); } };
+
+    const result = await runImageGeneration({
+      ctx: { userId: 'u1', db },
+      openrouter: client,
+      model: 'meta/muse-image',
+      args: { prompt: 'a cat' },
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('daily');
+    expect(usage.charged).toEqual([]);
+    expect(calls.failed).toBe(1);
+  });
+
+  test('an unpriced model skips metering entirely', async () => {
+    const { db, usage } = fakeMeteredDb();
+    const or = fakeOpenrouter();
+
+    const result = await runImageGeneration({
+      ctx: { userId: 'u1', db },
+      openrouter: or.client,
+      model: 'test/imgen',
+      args: { prompt: 'a cat' },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(usage.reserved).toEqual([]);
+    expect(usage.charged).toEqual([]);
   });
 });
