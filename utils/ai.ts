@@ -35,6 +35,8 @@ import {
   buildDiagramGenNote,
   getDiagramGuide,
   runDiagramGeneration,
+  extractDiagramText,
+  DIAGRAM_SCREENING_MAX_CHARS,
   type DiagramGenContext,
 } from './diagramGen';
 import {
@@ -182,7 +184,12 @@ export interface ToolCallRecord {
   ok: boolean;
 }
 
-const MAX_TOOL_ITERATIONS = 5;
+// A diagram or a composition costs two iterations on its own (read the guide,
+// then render), so a turn that also searches the web needs real headroom — at 5
+// the loop routinely cut the model off before it drew anything, and the answer
+// text never admitted it. Each iteration is a full model round trip: raising
+// this raises the worst-case latency and token spend of a tool-heavy turn.
+const MAX_TOOL_ITERATIONS = 7;
 const MAX_TITLE_CHARS = 80;
 const MAX_RECORDED_COMPOSITION_CHARS = 500;
 const MAX_RECORDED_SOURCE_CHARS = 500;
@@ -339,6 +346,23 @@ interface GenerateContentResult {
   /** Generated files to attach to the reply (images from generate_image, WAV audio from generate_music). */
   images: ImageAttachment[];
   toolCalls: ToolCallRecord[];
+  /**
+   * Text the model produced through a channel the reply text does not carry —
+   * currently the labels inside a rendered diagram. The output content screen
+   * must judge these: they reach the user as a picture, so `Response Safety`
+   * over the reply text alone would never see them. Captured here because the
+   * untruncated tool arguments only exist inside the loop (`redactToolCallArgs`
+   * cuts the recorded copy to 500 chars for the audit row).
+   */
+  screeningText: string[];
+  /**
+   * True when the loop hit `MAX_TOOL_ITERATIONS` and dropped the tools out from
+   * under a model that was still calling them. The model is then told to answer
+   * from what it has, so a generation it had not got round to yet simply never
+   * happens — and the reply reads as though it did. Callers surface this;
+   * without it the turn is indistinguishable from one that finished normally.
+   */
+  toolBudgetExhausted: boolean;
 }
 
 async function resolvePersonaSystemPrompt(persona: Persona): Promise<string> {
@@ -525,9 +549,14 @@ ${systemPrompt || ''}
     // *prior* iteration — the composition must be written with the guide in context.
     let musicGuideRead = false;
     let diagramGuideRead = false;
+    let toolBudgetExhausted = false;
+    const screeningText: string[] = [];
 
     for (let iter = 0; iter < MAX_TOOL_ITERATIONS + 1; iter += 1) {
       const isLastForcedClose = iter === MAX_TOOL_ITERATIONS;
+      // Reaching this point means every prior iteration ended in a tool call, so
+      // the model was mid-workflow when the budget ran out.
+      if (isLastForcedClose && toolsAvailable) toolBudgetExhausted = true;
       const requestBody: any = {
         model,
         messages: requestMessages,
@@ -687,6 +716,17 @@ ${systemPrompt || ''}
               ctx: diagramGen, args: parsedArgs, guideWasRead: diagramGuideReadAtBatchStart,
             });
             if (genRes.ok) {
+              const diagramText = extractDiagramText(String(parsedArgs?.source ?? ''));
+              const diagramTitle = String(parsedArgs?.title ?? '').trim();
+              if (diagramText || diagramTitle) {
+                // Cap the assembled entry, not just the extracted body: `title`
+                // is raw model input and is not length-bounded here (the render
+                // path's own `sanitizeTitle` never reaches this string), so a
+                // long title could otherwise push the entry past the budget the
+                // cap exists to hold.
+                const entry = `[diagram${diagramTitle ? `: ${diagramTitle}` : ''}] ${diagramText}`.trim();
+                screeningText.push(entry.slice(0, DIAGRAM_SCREENING_MAX_CHARS));
+              }
               generatedImages.push(genRes.attachment);
               resultText = genRes.resultText;
               ok = true;
@@ -768,7 +808,9 @@ ${systemPrompt || ''}
         logError('Failed to record AI usage (OpenRouter):', err);
       }
     }
-    return { text: cleanedText, images: generatedImages, toolCalls };
+    return {
+      text: cleanedText, images: generatedImages, toolCalls, screeningText, toolBudgetExhausted,
+    };
   }
 
   throw new Error(`Unknown provider: ${provider}`);

@@ -20,6 +20,7 @@ import { trimHistoryToFit } from '../../utils/tokenizer';
 import { extractPdfsFromMessage } from '../../utils/pdf';
 import {
   collectMediaFromMessage, hasQualifyingMedia, tryAcquireMediaSlot, releaseMediaSlot,
+  markStaleMediaPlaceholders, joinWithAnd,
   type MediaKind,
 } from '../../utils/aiMedia';
 import {
@@ -132,6 +133,9 @@ const scriptHandlers = {
       let moderationImageParts: any[] = [];
       let mediaPlaceholders: string[] = [];
       let editOnlyPlaceholders: string[] = [];
+      // Attachments the user sent that never reached the model. They go into the
+      // prompt so the reply matches the ⚠ notice the user was just shown.
+      let unreadablePlaceholders: string[] = [];
       const mediaNotices: string[] = [];
       let mediaSlotHeld = false;
       // Modalities this persona's model can read — Marv's vision route takes
@@ -148,6 +152,7 @@ const scriptHandlers = {
       if (shouldCollectMedia) {
         if (!tryAcquireMediaSlot()) {
           mediaNotices.push('⚠ Too many attachment-reading requests in flight right now — answering without your attachments. Try again in a moment.');
+          unreadablePlaceholders = ['[the user attached files] (NOT VIEWABLE — the bot was too busy to download them. You cannot see them. Tell the user to try again in a moment.)'];
         } else {
           mediaSlotHeld = true;
           try {
@@ -185,6 +190,7 @@ const scriptHandlers = {
                 (m) => `${m.placeholder} (you cannot view this image, but your generate_image tool can edit it)`,
               )
               : unreadable.map((m) => `${m.placeholder} (you cannot view this image)`);
+            unreadablePlaceholders = collected.unreadable;
             mediaNotices.push(...collected.notices);
           } catch (mediaErr) {
             logError('AiChat: media collection failed, proceeding without attachments:', mediaErr);
@@ -194,6 +200,7 @@ const scriptHandlers = {
             moderationImageParts = [];
             mediaPlaceholders = [];
             editOnlyPlaceholders = [];
+            unreadablePlaceholders = ['[the user attached files] (NOT VIEWABLE — reading them failed. You cannot see them. Say so plainly; do not guess at their contents.)'];
           }
         }
       }
@@ -203,7 +210,7 @@ const scriptHandlers = {
           .catch((e) => { logError('Attachment notice reply failed:', e); });
       }
       const pdfPrefix = pdfBlocks.length > 0 ? `${pdfBlocks.join('\n\n')}\n\n` : '';
-      const allPlaceholders = [...mediaPlaceholders, ...editOnlyPlaceholders];
+      const allPlaceholders = [...mediaPlaceholders, ...editOnlyPlaceholders, ...unreadablePlaceholders];
       const mediaSuffix = allPlaceholders.length > 0 ? `\n${allPlaceholders.join('\n')}` : '';
 
       // Tag every prompt with who is speaking and what club role they hold, so the
@@ -261,7 +268,15 @@ const scriptHandlers = {
 
           // Tool rows are audit-only and get filtered out before replay anyway —
           // exclude them from the token budget so they don't crowd out real turns.
-          filteredHistory = rawHistory.filter((h: { role: string }) => h.role !== 'tool');
+          filteredHistory = rawHistory
+            .filter((h: { role: string }) => h.role !== 'tool')
+            // Attachment bytes are never persisted, so a stored `[attached
+            // image: x]` has nothing behind it on replay. Mark it as past and
+            // unviewable *before* trimming, so the sliding window budgets the
+            // tokens that will actually be sent.
+            .map((h: { role: string; message: string }) => (h.role === 'user'
+              ? { ...h, message: markStaleMediaPlaceholders(h.message) }
+              : h));
 
           // Token-based sliding window: trim oldest messages to fit context.
           // Budgeted against the model this turn will actually run on — a dual-
@@ -444,7 +459,9 @@ const scriptHandlers = {
             mediaSlotHeld = false;
           }
         }
-        const { text, images, toolCalls } = genResult;
+        const {
+          text, images, toolCalls, screeningText, toolBudgetExhausted,
+        } = genResult;
 
         // Post-screen the exchange — the classifier judges the reply with the turn
         // that produced it in context. Nothing from this turn is delivered or
@@ -456,11 +473,22 @@ const scriptHandlers = {
         // wave the files through — so the prompts the model asked the tools for
         // are screened as part of the output text.
         if (moderationOn) {
+          // Short captions for what this turn asked the generation tools to make.
+          // A diagram's caption is its title — its *labels* are screened as text
+          // below, via `screeningText`, not squeezed in here: this string is the
+          // context line that rides along with the images, and the classifier
+          // call carrying base64 attachments is the slowest one on the turn.
           const generationPrompts = (toolCalls ?? [])
-            .filter((tc: any) => tc.name === IMAGE_GEN_TOOL_NAME || tc.name === MUSIC_GEN_TOOL_NAME)
+            .filter((tc: any) => tc.name === IMAGE_GEN_TOOL_NAME
+              || tc.name === MUSIC_GEN_TOOL_NAME
+              || tc.name === DIAGRAM_GEN_TOOL_NAME)
             .map((tc: any) => String(tc.args?.prompt ?? tc.args?.title ?? ''))
             .filter(Boolean);
-          const screenedOutput = [text, ...generationPrompts].filter(Boolean).join('\n');
+          // `screeningText` carries the words inside a rendered diagram. Without
+          // it the only thing judging them is the image classifier reading them
+          // off a picture, which is a much weaker read than screening the text.
+          const screenedOutput = [text, ...generationPrompts, ...(screeningText ?? [])]
+            .filter(Boolean).join('\n');
           const outboundVerdict = await moderateExchange(ownTurnText, screenedOutput);
           if (!outboundVerdict.safe) {
             await flagAndNotify(outboundVerdict);
@@ -470,6 +498,12 @@ const scriptHandlers = {
           // attached source can turn a benign instruction into an unsafe image.
           // Only runs when this turn actually produced one; generated audio is
           // skipped inside (the classifier takes no audio).
+          //
+          // `images` includes rendered diagrams (they are PNGs), so the caption
+          // must cover the diagram tool too — with only the image/music prompts
+          // in it, a diagram-only turn was screened against an empty string, and
+          // a turn that made both had its diagram judged under the *image's*
+          // prompt. A wrong caption is worse than none: it pauses the session.
           const imageVerdict = await moderateGeneratedImages(
             generationPrompts.join('\n'),
             images,
@@ -519,13 +553,53 @@ const scriptHandlers = {
         const imagePrefix = imageCallHappened ? '-# 🎨 generated an image\n' : '';
         const musicPrefix = musicCallHappened ? '-# 🎵 composed music\n' : '';
         const diagramPrefix = diagramCallHappened ? '-# 📊 drew a diagram\n' : '';
+        // A generation tool that was tried and never succeeded. Every failure —
+        // the daily image cap, a provider error, markup the renderer rejected,
+        // the guide gate — comes back as tool-result text addressed to the model,
+        // which is free to ignore it and answer as though the file were attached.
+        // Only failures *after* the tool's last success count. Order matters in
+        // both directions: the first attempt at a diagram or a composition is
+        // routinely rejected for skipping the guide and then retried, so a
+        // failure before a success is recovered and must stay quiet — while a
+        // failure after one is a file the user asked for and did not get, even
+        // though an earlier call did attach something.
+        const genToolOutcome = (name: string): 'none' | 'ok' | 'failed' | 'partial' => {
+          const attempts = (toolCalls ?? []).filter((tc: any) => tc.name === name);
+          if (attempts.length === 0) return 'none';
+          const lastOk = attempts.map((tc: any) => !!tc.ok).lastIndexOf(true);
+          if (!attempts.slice(lastOk + 1).some((tc: any) => !tc.ok)) return 'ok';
+          return lastOk === -1 ? 'failed' : 'partial';
+        };
+        const genLabels: [string, string][] = [
+          [IMAGE_GEN_TOOL_NAME, 'generate an image'],
+          [MUSIC_GEN_TOOL_NAME, 'compose music'],
+          [DIAGRAM_GEN_TOOL_NAME, 'draw a diagram'],
+        ];
+        const outcomes = genLabels.map(([name, label]) => [genToolOutcome(name), label] as const);
+        const failedLabels = outcomes.filter(([o]) => o === 'failed').map(([, label]) => label);
+        const partialLabels = outcomes.filter(([o]) => o === 'partial').map(([, label]) => label);
+        // Kept as two lines rather than one merged notice: "nothing is attached"
+        // is false the moment an earlier call of the same tool did attach
+        // something, and that is exactly the case the user needs told apart.
+        const genFailPrefix = (failedLabels.length > 0
+          ? `-# ⚠ tried to ${joinWithAnd(failedLabels)} and couldn't — nothing is attached\n`
+          : '')
+          + (partialLabels.length > 0
+            ? `-# ⚠ tried again to ${joinWithAnd(partialLabels)} and couldn't — some of what I attached is missing\n`
+            : '');
+        // The tool budget ran out mid-workflow. A diagram costs two steps (guide,
+        // then render), so a turn that also searched can be cut off before it
+        // ever draws — and the answer text will not admit it.
+        const toolLimitPrefix = toolBudgetExhausted
+          ? '-# ⚠ ran out of tool steps — anything I hadn\'t finished is missing\n'
+          : '';
         const mediaReadPrefix = mediaPlaceholders.length > 0 && !mediaDropped
           ? `-# 📎 read ${mediaPlaceholders.length} attachment${mediaPlaceholders.length === 1 ? '' : 's'}\n`
           : '';
         const mediaFailPrefix = mediaDropped
           ? '-# ⚠ the model rejected the attachments — answered without them\n'
           : '';
-        let remainingText = `${searchPrefix}${imagePrefix}${musicPrefix}${diagramPrefix}${mediaReadPrefix}${mediaFailPrefix}${(text || '').toString()}`;
+        let remainingText = `${searchPrefix}${imagePrefix}${musicPrefix}${diagramPrefix}${genFailPrefix}${toolLimitPrefix}${mediaReadPrefix}${mediaFailPrefix}${(text || '').toString()}`;
         let previousMsg: any = null;
         let filesToAttach: any[] = images || [];
 

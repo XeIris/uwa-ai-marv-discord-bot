@@ -188,6 +188,31 @@ function decodeEntities(text: string): string {
 }
 
 /**
+ * Pulls the human-readable text out of diagram markup, for content screening.
+ *
+ * A diagram is an output channel like any other: the model chooses every label
+ * in it, and that text reaches the user as a picture. The output screen judges
+ * the reply text, which does not contain it — and screening the rendered PNG
+ * through an image classifier is a far weaker read of words than screening the
+ * words. This gives the text screen the actual strings.
+ *
+ * Deliberately crude. Tag contents go, attribute values go (they are geometry
+ * and colour, not prose), entities are decoded, whitespace is collapsed. The
+ * result is capped so a 20k-char source can never turn one screening call into
+ * three on the critical path of the reply.
+ */
+export const DIAGRAM_SCREENING_MAX_CHARS = 4000;
+
+export function extractDiagramText(source: string, maxChars = DIAGRAM_SCREENING_MAX_CHARS): string {
+  const text = (source ?? '')
+    // <style> bodies are CSS, and their braces would otherwise survive as prose.
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ');
+  const collapsed = decodeEntities(text).replace(/\s+/g, ' ').trim();
+  return collapsed.length > maxChars ? collapsed.slice(0, maxChars) : collapsed;
+}
+
+/**
  * Tolerant tokenizer for the restricted markup subset. Deliberately rejects
  * anything exotic rather than trying to recover: `<!…>` (DOCTYPE, comments,
  * ENTITY, CDATA) and `<?…?>` are refused outright, which is what keeps entity
