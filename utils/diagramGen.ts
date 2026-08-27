@@ -201,7 +201,9 @@ function decodeEntities(text: string): string {
  * result is capped so a 20k-char source can never turn one screening call into
  * three on the critical path of the reply.
  */
-export function extractDiagramText(source: string, maxChars = 4000): string {
+export const DIAGRAM_SCREENING_MAX_CHARS = 4000;
+
+export function extractDiagramText(source: string, maxChars = DIAGRAM_SCREENING_MAX_CHARS): string {
   const text = (source ?? '')
     // <style> bodies are CSS, and their braces would otherwise survive as prose.
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')

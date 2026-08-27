@@ -557,19 +557,36 @@ const scriptHandlers = {
         // the daily image cap, a provider error, markup the renderer rejected,
         // the guide gate — comes back as tool-result text addressed to the model,
         // which is free to ignore it and answer as though the file were attached.
-        // Warn only when *no* call to that tool succeeded: the first attempt at a
-        // diagram or a composition is routinely rejected for skipping the guide
-        // and then retried, and a retry that worked is not a failure.
-        const genToolFailed = (name: string) => (toolCalls ?? []).some((tc: any) => tc.name === name && !tc.ok)
-          && !(toolCalls ?? []).some((tc: any) => tc.name === name && tc.ok);
-        const failedGenLabels = [
+        // Only failures *after* the tool's last success count. Order matters in
+        // both directions: the first attempt at a diagram or a composition is
+        // routinely rejected for skipping the guide and then retried, so a
+        // failure before a success is recovered and must stay quiet — while a
+        // failure after one is a file the user asked for and did not get, even
+        // though an earlier call did attach something.
+        const genToolOutcome = (name: string): 'none' | 'ok' | 'failed' | 'partial' => {
+          const attempts = (toolCalls ?? []).filter((tc: any) => tc.name === name);
+          if (attempts.length === 0) return 'none';
+          const lastOk = attempts.map((tc: any) => !!tc.ok).lastIndexOf(true);
+          if (!attempts.slice(lastOk + 1).some((tc: any) => !tc.ok)) return 'ok';
+          return lastOk === -1 ? 'failed' : 'partial';
+        };
+        const genLabels: [string, string][] = [
           [IMAGE_GEN_TOOL_NAME, 'generate an image'],
           [MUSIC_GEN_TOOL_NAME, 'compose music'],
           [DIAGRAM_GEN_TOOL_NAME, 'draw a diagram'],
-        ].filter(([name]) => genToolFailed(name)).map(([, label]) => label);
-        const genFailPrefix = failedGenLabels.length > 0
-          ? `-# ⚠ tried to ${joinWithAnd(failedGenLabels)} and couldn't — nothing is attached\n`
-          : '';
+        ];
+        const outcomes = genLabels.map(([name, label]) => [genToolOutcome(name), label] as const);
+        const failedLabels = outcomes.filter(([o]) => o === 'failed').map(([, label]) => label);
+        const partialLabels = outcomes.filter(([o]) => o === 'partial').map(([, label]) => label);
+        // Kept as two lines rather than one merged notice: "nothing is attached"
+        // is false the moment an earlier call of the same tool did attach
+        // something, and that is exactly the case the user needs told apart.
+        const genFailPrefix = (failedLabels.length > 0
+          ? `-# ⚠ tried to ${joinWithAnd(failedLabels)} and couldn't — nothing is attached\n`
+          : '')
+          + (partialLabels.length > 0
+            ? `-# ⚠ tried again to ${joinWithAnd(partialLabels)} and couldn't — some of what I attached is missing\n`
+            : '');
         // The tool budget ran out mid-workflow. A diagram costs two steps (guide,
         // then render), so a turn that also searched can be cut off before it
         // ever draws — and the answer text will not admit it.

@@ -36,6 +36,7 @@ import {
   getDiagramGuide,
   runDiagramGeneration,
   extractDiagramText,
+  DIAGRAM_SCREENING_MAX_CHARS,
   type DiagramGenContext,
 } from './diagramGen';
 import {
@@ -718,7 +719,13 @@ ${systemPrompt || ''}
               const diagramText = extractDiagramText(String(parsedArgs?.source ?? ''));
               const diagramTitle = String(parsedArgs?.title ?? '').trim();
               if (diagramText || diagramTitle) {
-                screeningText.push(`[diagram${diagramTitle ? `: ${diagramTitle}` : ''}] ${diagramText}`.trim());
+                // Cap the assembled entry, not just the extracted body: `title`
+                // is raw model input and is not length-bounded here (the render
+                // path's own `sanitizeTitle` never reaches this string), so a
+                // long title could otherwise push the entry past the budget the
+                // cap exists to hold.
+                const entry = `[diagram${diagramTitle ? `: ${diagramTitle}` : ''}] ${diagramText}`.trim();
+                screeningText.push(entry.slice(0, DIAGRAM_SCREENING_MAX_CHARS));
               }
               generatedImages.push(genRes.attachment);
               resultText = genRes.resultText;

@@ -8,6 +8,7 @@ import {
   clampDimension,
   sanitizeTitle,
   extractDiagramText,
+  DIAGRAM_SCREENING_MAX_CHARS,
   MAX_WIDTH,
   MIN_WIDTH,
   MAX_HEIGHT,
@@ -257,6 +258,7 @@ describe('extractDiagramText', () => {
   test('caps the output so one screening call cannot become several', () => {
     const long = `<p>${'word '.repeat(5000)}</p>`;
     expect(extractDiagramText(long, 4000).length).toBe(4000);
+    expect(extractDiagramText(long).length).toBe(DIAGRAM_SCREENING_MAX_CHARS);
   });
 
   test('tolerates empty and nullish source', () => {
