@@ -23,21 +23,20 @@ interface ModelMultipliers {
 // Multipliers per live OpenRouter pricing ($0.28/M = 1x). Models not listed here
 // bill at 1x/1x (identical to the old raw-token accounting).
 const MODEL_MULTIPLIERS: Record<string, ModelMultipliers> = {
-  // $0.08/M in, $0.18/M out. The slug is served by ~28 endpoints spanning
-  // $0.03-$0.44 in and $0.10-$1.32 out, and Marv routes it by price with
-  // fallbacks (see the persona's providerRouting), so there is no single true
-  // rate. Pegged to the 5th-cheapest endpoint: the floor would undercharge
-  // every time the cheap providers are busy and we fall down the list, while
-  // the ceiling would overcharge on the common path. Was 0.5x/1x, which billed
-  // the $0.14/$0.28 of a slug we no longer use — a ~2.3x overcharge.
+  // $0.15/M in, $0.50/M out — Marv's model, text and media alike. Any
+  // promotional/sale rate OpenRouter is running is deliberately NOT priced in
+  // here; these track list price.
+  'z-ai/glm-5.3-flash': { input: 0.54, output: 1.79 },
+  // $0.08/M in, $0.18/M out. Runs the internal personas (Summarizer, TitleGen)
+  // and the config default. The slug is served by ~28 endpoints spanning
+  // $0.03-$0.44 in and $0.10-$1.32 out, so there is no single true rate; pegged
+  // to the 5th-cheapest, which covers the realistic landing band without
+  // charging ceiling prices on the common path.
   'deepseek/deepseek-v4-flash-0731': { input: 0.29, output: 0.64 },
   // $0.14/M in, $0.28/M out
   'xiaomi/mimo-v2.5': { input: 0.5, output: 1 },
   // $2/M in, $6/M out
   'x-ai/grok-4.5': { input: 7, output: 21.43 },
-  // $0.20/M in, $1.2/M out. OpenRouter currently lists a further 50% off; that's
-  // treated as a temporary promo and deliberately NOT priced in here.
-  'openai/gpt-5.6-luna': { input: 0.72, output: 4.3 },
   // $0.03/M in, $0.13/M out
   'qwen/qwen3.7-flash': { input: 0.11, output: 0.46 },
   // Free tier — costs nothing, so it charges nothing (see FREE_MODELS).

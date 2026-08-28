@@ -13,6 +13,10 @@ describe('creditsForTokens', () => {
     expect(creditsForTokens('some/unknown-model', 1000, 500)).toBe(1500);
   });
 
+  test('bills glm-5.3-flash at 0.54x in / 1.79x out ($0.15/M in, $0.50/M out)', () => {
+    expect(creditsForTokens('z-ai/glm-5.3-flash', 100000, 50000)).toBeCloseTo(143500, 6);
+  });
+
   test('bills deepseek-v4-flash at 0.29x in / 0.64x out ($0.08/M in, $0.18/M out)', () => {
     expect(creditsForTokens('deepseek/deepseek-v4-flash-0731', 100000, 50000)).toBeCloseTo(61000, 6);
   });
@@ -23,10 +27,6 @@ describe('creditsForTokens', () => {
 
   test('bills grok-4.5 at 7x in / 21.43x out ($2/M in, $6/M out)', () => {
     expect(creditsForTokens('x-ai/grok-4.5', 10000, 10000)).toBe(284300);
-  });
-
-  test('bills gpt-5.6-luna at 0.72x in / 4.3x out ($0.20/M in, $1.2/M out)', () => {
-    expect(creditsForTokens('openai/gpt-5.6-luna', 10000, 10000)).toBe(50200);
   });
 
   test('bills qwen3.7-flash at 0.11x in / 0.46x out ($0.03/M in, $0.13/M out)', () => {
@@ -40,9 +40,9 @@ describe('creditsForTokens', () => {
 
 describe('usdCostForTokens', () => {
   test('derives USD from credits at the $0.28/M base rate', () => {
-    // 1M in @0.29x + 1M out @0.64x = 0.93M credits → $0.2604
-    expect(usdCostForTokens('deepseek/deepseek-v4-flash-0731', 1_000_000, 1_000_000))
-      .toBeCloseTo(0.93 * CREDIT_BASE_USD_PER_MILLION, 10);
+    // 1M in @0.54x + 1M out @1.79x = 2.33M credits → $0.6524
+    expect(usdCostForTokens('z-ai/glm-5.3-flash', 1_000_000, 1_000_000))
+      .toBeCloseTo(2.33 * CREDIT_BASE_USD_PER_MILLION, 10);
   });
 
   test('1x model: 1M tokens costs exactly the base rate', () => {

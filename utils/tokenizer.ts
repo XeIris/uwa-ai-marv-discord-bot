@@ -36,17 +36,19 @@ const CONTEXT_LIMITS: Record<string, number> = {
   // OpenRouter models
   // Calibration further narrows the effective budget based on real usage.
   'nvidia/nemotron-3-ultra-550b-a55b:free': 1_000_000,
-  // The model advertises 1M, but Marv routes it by price (see the persona's
-  // providerRouting) and the cheapest endpoints serve it at 256k. Budget for the
-  // smallest endpoint we can land on rather than the headline number — a 400 for
-  // overflowing a context we assumed was 4x bigger costs a reply.
+  // Marv's model. The model actually serves ~1.3M, but the budget is capped here
+  // deliberately: no Discord conversation comes near 128k, and a low cap only
+  // costs trimmed history while a high one risks a 400 that costs the reply.
+  'z-ai/glm-5.3-flash': 128_000,
+  // Internal personas (Summarizer, TitleGen) and the config default. The slug
+  // advertises 1M, but it runs on default routing across ~28 endpoints and the
+  // smallest serve 256k — budget for the smallest one we can land on.
   'deepseek/deepseek-v4-flash-0731': 262_144,
   'xiaomi/mimo-v2-flash:nitro': 256_000,
   // 1M on the pinned Xiaomi endpoint; media (base64 parts) is not counted by
   // the tokenizer, so leave the standard reserve headroom to absorb it.
   'xiaomi/mimo-v2.5': 1_000_000,
   'x-ai/grok-4.5': 500_000,
-  'openai/gpt-5.6-luna': 1_050_000,
   // Default for unknown models
   default: 128_000,
 };
