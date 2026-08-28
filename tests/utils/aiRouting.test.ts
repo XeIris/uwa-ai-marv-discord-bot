@@ -64,10 +64,14 @@ describe('Marv persona wiring', () => {
     expect(resolveTurnModel(marv, true).reasoning).toEqual({ enabled: false });
   });
 
-  test('runs on OpenRouter default routing', () => {
-    // The price-sorted DeepSeek routing went with the DeepSeek slug; nothing
-    // model-specific is pinned any more.
-    expect(marv.providerRouting).toBeUndefined();
-    expect(resolveTurnModel(marv, false).providerRouting).toBeUndefined();
+  test('never routes to a provider that retains prompts', () => {
+    // OpenRouter defaults to data_collection: "allow". Marv's prompts carry
+    // member usernames, so the deny must survive even though the rest of the
+    // price-sorted DeepSeek routing went with the DeepSeek slug.
+    expect(marv.providerRouting).toEqual({ data_collection: 'deny' });
+    expect(resolveTurnModel(marv, false).providerRouting)
+      .toEqual({ data_collection: 'deny' });
+    expect(resolveTurnModel(marv, true).providerRouting)
+      .toEqual({ data_collection: 'deny' });
   });
 });

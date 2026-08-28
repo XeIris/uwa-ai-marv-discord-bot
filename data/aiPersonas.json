@@ -8,6 +8,9 @@
       ],
       "provider": "openrouter",
       "model": "z-ai/glm-5.3-flash",
+      "providerRouting": {
+        "data_collection": "deny"
+      },
       "reasoning": {
         "enabled": false
       },

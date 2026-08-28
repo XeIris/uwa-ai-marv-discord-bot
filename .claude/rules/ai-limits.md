@@ -93,11 +93,14 @@ unused. (Until 2026-08-28 Marv split `deepseek/deepseek-v4-flash-0731` for text 
 block still run `deepseek/deepseek-v4-flash-0731` — they are text-only jobs where the cheaper slug
 is the whole point, so don't sweep them onto Marv's model.
 
-Marv sets **no `providerRouting`** — plain OpenRouter default routing. The old price-sorted,
-`require_parameters`-pinned block was specific to the DeepSeek slug's ~28-endpoint spread and went
-with it. Consequence to know: nothing now forces an endpoint that supports `tools`, so if club tools
-or web search start silently vanishing from replies, a `require_parameters: true` routing block is
-the first thing to add back.
+Marv's `providerRouting` is down to **one field, `data_collection: "deny"`** — and that field is a
+privacy boundary, not a preference: OpenRouter defaults to `allow`, which permits routing to
+providers that retain prompts and may train on them, and every Marv prompt carries a member's
+username in its metadata prefix. **Don't drop it when tuning routing.** The rest of the old block
+(price sorting, `preferred_min_throughput`, `require_parameters`) was written for the DeepSeek
+slug's ~28-endpoint price spread and went with it. Consequence to know: nothing now forces an
+endpoint that supports `tools`, so if club tools or web search start silently vanishing from
+replies, `require_parameters: true` is the first thing to add back.
 
 `CONTEXT_LIMITS['z-ai/glm-5.3-flash']` in `utils/tokenizer.ts` is **128k** against a real ~1.3M
 window — capped deliberately, not by ignorance: no Discord conversation comes near 128k, and the
