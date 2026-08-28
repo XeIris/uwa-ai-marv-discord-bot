@@ -108,14 +108,15 @@ export interface Persona {
    * Omitted/false = no media input.
    *
    * With `visionModel` set this describes the **vision** model, not `model` —
-   * see resolveTurnModel.
+   * see resolveTurnModel. Marv's model reads media itself, so it sets no
+   * vision route and this describes `model`.
    */
   mediaInput?: boolean | MediaKind[];
   /**
    * Dual routing: the model to use for turns that carry attachments the chat
-   * model must actually see. Marv's default model (DeepSeek V4 Flash) is
-   * text-only, so image turns route here instead of losing the attachment.
-   * openrouter only; omitted means every turn uses `model`.
+   * model must actually see. Only needed when `model` is text-only — no
+   * configured persona uses it today, since Marv's model reads images and
+   * video itself. openrouter only; omitted means every turn uses `model`.
    */
   visionModel?: string;
   /** Provider routing for `visionModel`; `providerRouting` covers `model`. */
@@ -123,9 +124,8 @@ export interface Persona {
   /**
    * OpenRouter `reasoning` body field for `model`, e.g. `{ "enabled": false }`.
    * Reasoning models bill their thinking as completion tokens and spend seconds
-   * on it — on DeepSeek V4 Flash a one-line chat answer measured 150 reasoning
-   * tokens and ~18s, versus 0 and ~10s with it off, with tool calling unaffected.
-   * Omitted leaves the provider default.
+   * on it for no gain on a one-line chat answer, with tool calling unaffected
+   * either way. Omitted leaves the provider default.
    */
   reasoning?: Record<string, any>;
   /** Reasoning for `visionModel`; `reasoning` covers `model`. */

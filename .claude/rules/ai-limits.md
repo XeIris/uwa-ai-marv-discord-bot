@@ -72,42 +72,49 @@ per-attempt timeout (180s default, 480s music-compose, 60s titlegen), a 600s ove
 attempts, and 2s/4s/8s/16s backoff on 408/409/429/5xx/network **only**. The shared client sets
 `maxRetries: 0` so SDK retries don't stack — don't raise it.
 
-## Dual model routing
+## Model routing
 
-A persona may split one conversation across two models: `model` (+ `providerRouting`) runs text
+A persona *may* split one conversation across two models: `model` (+ `providerRouting`) runs text
 turns, `visionModel` (+ `visionProviderRouting`) runs turns carrying attachments the chat model must
 read. `resolveTurnModel(persona, hasReadableMedia)` in `utils/ai.ts` is the only place that decides,
 and **every consumer of one turn must ask it the same question** — history trimming and the
 text-only retry after a media failure included, or a fallback text turn silently bills at vision
 prices.
 
-Marv is the only invokable persona at all, and the one dual-routed one:
-`deepseek/deepseek-v4-flash-0731` for text, `openai/gpt-5.6-luna` for images. This is a capability split before it is a cost split — DeepSeek V4
-Flash is **text-only** on OpenRouter, so without the vision route every attached image would be
-dropped. It does support `tools`, so club tools, web search and the media-generation tools all work
-on the text route.
+**No persona is dual-routed today.** Marv — the only invokable persona — runs everything on
+`z-ai/glm-5.3-flash`, which takes `image` and `video` input natively (`mediaInput`) and supports
+`tools`, so club tools, web search and the media-generation tools all work on the one route. Audio
+is deliberately absent from `mediaInput`, and the system prompt says so. The dual-route machinery
+stays because it is the answer whenever a cheap text model can't read attachments; it is just
+unused. (Until 2026-08-28 Marv split `deepseek/deepseek-v4-flash-0731` for text against
+`openai/gpt-5.6-luna` for images, because DeepSeek V4 Flash is text-only on OpenRouter.)
 
-`providerRouting` on Marv sorts DeepSeek endpoints by price with `data_collection: "deny"` and
-`require_parameters: true` (tools must be supported). That routing is why
-`CONTEXT_LIMITS['deepseek/deepseek-v4-flash-0731']` in `utils/tokenizer.ts` is 256k, not the
-advertised 1M — a deliberately conservative floor, since `require_parameters` and price sorting can
-land the turn on a small-context endpoint (CoreWeave and Reka both serve 256k). Note the *cheapest*
-endpoints today serve the full 1M, so the 256k budget currently trims harder than it needs to; a
-retune wants live endpoint data, not a guess.
+**GLM is Marv's model only.** The internal personas (`Summarizer`, `TitleGen`) and the `defaults`
+block still run `deepseek/deepseek-v4-flash-0731` — they are text-only jobs where the cheaper slug
+is the whole point, so don't sweep them onto Marv's model.
 
-`reasoning` / `visionReasoning` are the same idea for OpenRouter's `reasoning` body field. Marv's
-text route sets `{ "enabled": false }`: DeepSeek V4 Flash otherwise spends ~150 reasoning tokens and
-~18s on a one-line chat answer (measured; ~10s and 0 with it off) and bills them as completion
-tokens, and tool calling is unaffected either way. The **music composing turn is exempt** — the
-request builder skips the override once `musicGuideRead` is set, because working out an arrangement
-is the one place thinking pays for itself.
+Marv sets **no `providerRouting`** — plain OpenRouter default routing. The old price-sorted,
+`require_parameters`-pinned block was specific to the DeepSeek slug's ~28-endpoint spread and went
+with it. Consequence to know: nothing now forces an endpoint that supports `tools`, so if club tools
+or web search start silently vanishing from replies, a `require_parameters: true` routing block is
+the first thing to add back.
 
-DeepSeek V4 Flash bills at **0.29x/0.64x** ($0.08/M in, $0.18/M out). The slug is served by ~28
-OpenRouter endpoints spanning $0.03–$0.44 in and $0.10–$1.32 out, and Marv routes it by price with
-fallbacks, so there is no single true rate: the table is pegged to the 5th-cheapest endpoint, which
-covers the realistic landing band without charging ceiling prices on the common path. (It billed
-0.5x/1x until 2026-08-27 — the rate of a slug we no longer use, a ~2.3x overcharge.) `AiUsage.cost`
-still ignores provider-side prompt caching, so it remains an upper bound.
+`CONTEXT_LIMITS['z-ai/glm-5.3-flash']` in `utils/tokenizer.ts` is **128k** against a real ~1.3M
+window — capped deliberately, not by ignorance: no Discord conversation comes near 128k, and the
+asymmetry favours a low cap (costs trimmed history) over a high one (costs the whole reply to a
+400). DeepSeek stays at 256k for the same shape of reason: it advertises 1M but the smallest of its
+~28 endpoints serve 256k, and it now runs on default routing.
+
+`reasoning` / `visionReasoning` are the same idea for OpenRouter's `reasoning` body field. Marv sets
+`{ "enabled": false }`: a chat model otherwise spends seconds and bills its thinking as completion
+tokens for no gain on a one-line answer, and tool calling is unaffected either way. The **music
+composing turn is exempt** — the request builder skips the override once `musicGuideRead` is set,
+because working out an arrangement is the one place thinking pays for itself.
+
+GLM 5.3 Flash bills at **0.54x/1.79x** ($0.15/M in, $0.50/M out, list); DeepSeek V4 Flash stays at
+**0.29x/0.64x** ($0.08/M in, $0.18/M out, pegged to the 5th-cheapest of its endpoint spread). Any
+promotional discount OpenRouter is running is deliberately not priced in, per the rule above.
+`AiUsage.cost` still ignores provider-side prompt caching, so it remains an upper bound.
 
 ## Image generation transport
 

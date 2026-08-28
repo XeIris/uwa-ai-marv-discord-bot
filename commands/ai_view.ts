@@ -12,7 +12,7 @@ class AiView extends Command {
     super(client, 'view', 'View all your AI chat sessions', [
       {
         name: 'search',
-        description: 'Filter sessions by title, AI name/trigger, or model (e.g. "marv", "deepseek")',
+        description: 'Filter sessions by title, AI name/trigger, or model (e.g. "marv", "glm")',
         type: 3,
         required: false,
       },
@@ -73,7 +73,7 @@ class AiView extends Command {
       const allSessions = await this.client.db.aiChat.getUserDiscordSessions(userId);
 
       // Search matches the session title, persona name, invoke trigger
-      // (e.g. "MARV"), configured model id (e.g. "deepseek/deepseek-v4-flash-0731"),
+      // (e.g. "MARV"), configured model id (e.g. "z-ai/glm-5.3-flash"),
       // or the numeric session id. Sessions left behind by retired personas are
       // still listed and still searchable by their old name.
       const sessions = search
@@ -89,7 +89,7 @@ class AiView extends Command {
       if (sessions.length === 0) {
         const description = allSessions.length === 0
           ? "You don't have any sessions yet. Say `marv` in a channel to start one!"
-          : `No sessions match \`${search}\`. Try a model (e.g. "deepseek") or part of a title.`;
+          : `No sessions match \`${search}\`. Try a model (e.g. "glm") or part of a title.`;
         await interaction.editReply({
           embeds: [
             new Discord.EmbedBuilder()

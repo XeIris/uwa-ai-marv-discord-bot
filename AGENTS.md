@@ -8,7 +8,7 @@ Not a GitHub fork and no shared commit history (squashed import), so upstream ch
 `git cherry-pick` from the `upstream` remote, never by merge. Upstream is **unlicensed** — don't
 copy its code into anything else without asking its authors first.
 
-**Last updated: 2026-08-27**
+**Last updated: 2026-08-28**
 
 > **Maintenance rule.** Edit agent docs only on *substantive architectural* change — new
 > architecture, new auth, new data flows/services, schema or security-model changes, or when
@@ -79,8 +79,9 @@ scope; don't resurrect them without saying so.
 persona with `clubTools: true`, which grants read-only tools backed by our own data: the committee
 roster (`/committee`), the events calendar (`/event`), the club constitution, four hand-maintained
 reference sheets (official links — also `/links`, UWA key dates, student perks, club FAQ), and UWA
-handbook unit lookup. Marv is **dual-routed** — image turns take a different model from text turns;
-the models and the routing rationale live in `.claude/rules/ai-limits.md`. He is summoned by his
+handbook unit lookup. Marv runs on a single model that reads
+images and video natively; the model and the routing rationale live in
+`.claude/rules/ai-limits.md`. He is summoned by his
 bare name (`marv`/`asimarv`, no sigil), matched on word boundaries so "marvel" doesn't summon him.
 In-chat flags: `-n` starts a fresh session, `-f` forgets the last turn (`utils/sessionFlag.ts`).
 Every user prompt is also tagged
